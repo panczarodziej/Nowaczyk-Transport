@@ -25,6 +25,7 @@
       "save-importer.js"
     ],
     "win": {
+      "icon": "icon.ico",
       "target": {
         "target": "nsis",
         "arch": [
