@@ -1,0 +1,15 @@
+{
+  "name": "nowaczyk-transport",
+  "version": "0.3.1",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "pg": "^8.13.3"
+  }
+}

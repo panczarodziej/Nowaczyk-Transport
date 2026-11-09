@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.env.*
+data.json
+data.json.tmp
+*.bak

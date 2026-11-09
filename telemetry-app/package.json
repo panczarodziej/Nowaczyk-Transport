@@ -1,0 +1,51 @@
+{
+  "name": "nowaczyk-transport-telemetry",
+  "version": "0.3.1",
+  "private": true,
+  "description": "Nowaczyk Transport — panel kierowcy i telemetria",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win nsis"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "pl.nowaczyk.transport.telemetry",
+    "productName": "Nowaczyk Transport Telemetry",
+    "files": [
+      "main.js",
+      "speditor-bridge.js",
+      "preload.js",
+      "ui.html",
+      "icon.png",
+      "save-importer.js"
+    ],
+    "win": {
+      "target": {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "extraResources": [
+      {
+        "from": "plugins",
+        "to": "plugins"
+      },
+      {
+        "from": "rencloud-reader.ps1",
+        "to": "rencloud-reader.ps1"
+      }
+    ],
+    "artifactName": "Nowaczyk-Transport-Setup-${version}.${ext}"
+  }
+}
