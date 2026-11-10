@@ -325,7 +325,12 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const matches=Object.entries(cities).filter(([,city])=>normalize(city[0])===key);
    return matches.length===1?matches[0][0]:name;
   }
-  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:cityId(r.from),company:r.sourceCompany||''},to:{country:r.toCountry||'',city:cityId(r.to),company:r.destinationCompany||''},cargo:{name:r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
+  const companyAliases=require('./ets2-company-aliases.json');
+  function companyId(name){
+   const key=normalize(name||'').replace(/[^a-z0-9]/g,'');
+   return Object.hasOwn(companyAliases,key)?companyAliases[key]:name||'';
+  }
+  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:cityId(r.from),company:companyId(r.sourceCompany)},to:{country:r.toCountry||'',city:cityId(r.to),company:companyId(r.destinationCompany)},cargo:{name:r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="ks-job-'+r.id+'.json"','Cache-Control':'no-store'});return res.end(JSON.stringify(job,null,2));
  }
  if(u.pathname==='/api/routes/assignees'&&method==='GET'){
