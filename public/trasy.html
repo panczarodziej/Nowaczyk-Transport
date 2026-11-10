@@ -81,7 +81,15 @@ function updateCompanySuggestions(){
    names.set(normalizeLocation(name),name);
   }
   const matches=Object.entries(cities).filter(([id,[name]])=>city&&(normalizeLocation(id)===city||normalizeLocation(name)===city));
-  if(matches.length===1)for(const [id,company] of depots)if(id===matches[0][0])names.set(normalizeLocation(company),company);
+  if(matches.length===1){
+   const [cityId]=matches[0];
+   const selectedDepots=depots.filter(([id])=>id===cityId);
+   const availableDepots=selectedDepots.length?selectedDepots:profileDepots.filter(([id])=>id===cityId);
+   for(const [,company] of availableDepots){
+    const key=normalizeLocation(company);
+    if(!names.has(key))names.set(key,company);
+   }
+  }
   const options=[...names.values()].sort((a,b)=>a.localeCompare(b,'pl')).map(name=>new Option(name,name));
   $(listId).replaceChildren(...options);
  }
