@@ -473,6 +473,10 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(who(req))return send(res,403,{error:'Panel rekrutacji jest dostępny dla kierownictwa.'});
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
  }
+ if(u.pathname==='/centrum-floty.html'&&!canDispatch(req)){
+  if(who(req))return send(res,403,{error:'Mapa floty jest dostępna dla dyspozytorni.'});
+  res.writeHead(302,{Location:'/system-login.html'});return res.end();
+ }
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:who(req)?'/moj-panel.html':'/system-login.html'});return res.end()}
  if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/flota-online.html'&&!canDispatch(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);

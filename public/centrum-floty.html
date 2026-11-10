@@ -1,6 +1,52 @@
-<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Centrum floty</title><style>body{margin:0;background:#0d1421;color:#f1f5fa;font:16px system-ui}main{max-width:1150px;margin:auto;padding:30px}h1{margin-bottom:4px}.muted{color:#a7b4c8}.panel{background:#182438;border:1px solid #344158;border-radius:16px;padding:20px;margin:18px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #354158}a{color:#8ac4ff}.status{font-weight:700}button{padding:10px;border:0;border-radius:7px;cursor:pointer}small{color:#a7b4c8}</style><main><a href="/">← Panel Nowaczyk Transport</a><h1>Centrum floty</h1><p class="muted">Widok dla administratora i dyspozytora. Współrzędne ETS2, nie GPS na prawdziwej mapie.</p><div class="panel"><h2>Pozycje pojazdów</h2><p id="state" class="muted">Ładowanie…</p><div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Aktywność</th><th>Prędkość</th><th>Postój / kraj</th><th>X / Z</th><th>Aktualizacja</th></tr></thead><tbody id="rows"></tbody></table></div></div><div class="panel"><h2>Powiadomienia o jeździe i pauzach</h2><p class="muted">Powiadomienia przeglądarki działają po zezwoleniu i gdy panel jest otwarty. Zdarzenia są zgłaszane przez klienta, niezweryfikowane przez ETS2.</p><button id="enableNotifications">Włącz powiadomienia</button><p id="notifState" class="muted"></p><div id="activityFeed"></div></div></main><script>
+<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Centrum floty</title><style>body{margin:0;background:#0d1421;color:#f1f5fa;font:16px system-ui}main{max-width:1150px;margin:auto;padding:30px}h1{margin-bottom:4px}.muted{color:#a7b4c8}.panel{background:#182438;border:1px solid #344158;border-radius:16px;padding:20px;margin:18px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #354158}a{color:#8ac4ff}.status{font-weight:700}button{padding:10px;border:0;border-radius:7px;cursor:pointer}small{color:#a7b4c8}#fleetMap{display:block;width:100%;height:360px;background:#0d1726;border:1px solid #344158;border-radius:8px;touch-action:none;cursor:grab}#fleetMap circle{cursor:pointer}#fleetMap text{pointer-events:none}#mapDetails{min-height:1.5em}</style><main><a href="/">← Panel Nowaczyk Transport</a><h1>Centrum floty</h1><p class="muted">Widok dla kierownictwa i dyspozytorni. Pozycje są rysowane na siatce współrzędnych ETS2.</p><div class="panel"><h2>Pozycje pojazdów</h2><p id="state" class="muted">Ładowanie…</p>
+<div><button id="zoomIn" aria-label="Przybliż">+</button> <button id="zoomOut" aria-label="Oddal">−</button> <button id="fit">Pokaż całą flotę</button></div>
+<svg id="fleetMap" aria-label="Mapa pozycji ETS2"><defs><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#253b51"/></pattern></defs><rect width="100%" height="100%" fill="url(#grid)"/><g id="markers"/></svg>
+<p id="mapDetails" aria-live="polite">Kliknij znacznik kierowcy.</p><div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Aktywność</th><th>Prędkość</th><th>Postój / kraj</th><th>X / Z</th><th>Aktualizacja</th></tr></thead><tbody id="rows"></tbody></table></div></div><div class="panel"><h2>Powiadomienia o jeździe i pauzach</h2><p class="muted">Powiadomienia przeglądarki działają po zezwoleniu i gdy panel jest otwarty. Zdarzenia są zgłaszane przez klienta, niezweryfikowane przez ETS2.</p><button id="enableNotifications">Włącz powiadomienia</button><p id="notifState" class="muted"></p><div id="activityFeed"></div></div></main><script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function refresh(){try{const r=await fetch('/api/fleet/positions',{credentials:'same-origin',cache:'no-store'});if(!r.ok){$('state').textContent=r.status===403?'Brak uprawnień — zaloguj się jako administrator lub dyspozytor.':'Błąd pobierania pozycji ('+r.status+')';return}const d=await r.json(),ps=d.positions||[];$('state').textContent=ps.length?'Pozycji: '+ps.length+' • dane testowe / niezweryfikowane':'Brak pozycji. Najpierw trzeba podłączyć plugin ETS2 i klienta Windows.';$('rows').innerHTML=ps.map(p=>`<tr><td>${esc(p.driver)}</td><td class="status">${p.online?'Online (sygnał)':'Offline'}</td><td>${esc(p.online?p.activity||"Nieznana":"Offline")}</td><td>${esc(p.speedKmh)} km/h</td><td>${esc([p.place||p.city,p.country].filter(Boolean).join(", ")||"Brak danych")}<br><small>Od: ${esc(p.activitySince?new Date(p.activitySince).toLocaleString("pl-PL"):"—")}</small></td><td>${esc(p.x)} / ${esc(p.z)}</td><td>${esc(new Date(p.updatedAt).toLocaleString('pl-PL'))}</td></tr>`).join('');}catch(e){$('state').textContent='Brak połączenia z serwerem.'}}refresh();setInterval(refresh,15000);
+const map=$('fleetMap'), markers=$('markers');
+const svgNS='http://www.w3.org/2000/svg';
+let positions=[], selected=null, view=null, drag=null;
+function fitMap(){
+ if(!positions.length){view=null;drawMap();return}
+ const xs=positions.map(p=>p.x),zs=positions.map(p=>p.z);
+ const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...zs),bottom=Math.max(...zs);
+ view={x:(left+right)/2,z:(top+bottom)/2,scale:Math.min((map.clientWidth-80)/Math.max(1,right-left),(map.clientHeight-80)/Math.max(1,bottom-top),.5)};
+ drawMap();
+}
+function drawDetails(){
+ const p=positions.find(p=>p.driver===selected);
+ if(!p)return;
+ const since=Date.parse(p.activitySince);
+ const seconds=p.online&&Number.isFinite(since)?Math.max(0,Math.floor((Date.now()-since)/1000)):null;
+ const time=seconds===null?'—':[Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60].map(n=>String(n).padStart(2,'0')).join(':');
+ $('mapDetails').textContent=[p.driver,p.online?p.speedKmh+' km/h':'Offline · ostatnia pozycja',[p.place||p.city,p.country].filter(Boolean).join(', '),'Tachograf: '+(p.online?(p.activity||'Brak danych')+' · '+time:'—'),Number.isFinite(p.odometerKm)?'Licznik pojazdu: '+p.odometerKm.toLocaleString('pl-PL')+' km':''].filter(Boolean).join(' | ');
+}
+function drawMap(){
+ markers.replaceChildren();
+ if(!view)return;
+ for(const p of positions){
+  const x=(p.x-view.x)*view.scale+map.clientWidth/2,y=(p.z-view.z)*view.scale+map.clientHeight/2;
+  if(x<0||y<0||x>map.clientWidth||y>map.clientHeight)continue;
+  const dot=document.createElementNS(svgNS,'circle');
+  for(const [key,value] of Object.entries({cx:x,cy:y,r:p.driver===selected?9:6,fill:p.online?'#56d6a0':'#95a4b6',tabindex:0,role:'button','aria-label':p.driver}))dot.setAttribute(key,value);
+  dot.onclick=()=>{selected=p.driver;drawDetails();drawMap()};
+  dot.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();dot.onclick()}};
+  const label=document.createElementNS(svgNS,'text');
+  label.setAttribute('x',x+12);label.setAttribute('y',y+4);label.setAttribute('fill','#f1f5fa');label.textContent=p.driver;
+  markers.append(dot,label);
+ }
+}
+function zoom(factor){if(view){view.scale=Math.min(10,Math.max(.0001,view.scale*factor));drawMap()}}
+$('zoomIn').onclick=()=>zoom(1.5);
+$('zoomOut').onclick=()=>zoom(1/1.5);
+$('fit').onclick=fitMap;
+map.addEventListener('wheel',e=>{e.preventDefault();zoom(e.deltaY<0?1.25:.8)},{passive:false});
+map.onpointerdown=e=>{if(!view||e.target.closest('circle')||e.button!==0)return;drag={x:e.clientX,y:e.clientY};map.setPointerCapture(e.pointerId)};
+map.onpointermove=e=>{if(!drag)return;view.x-=(e.clientX-drag.x)/view.scale;view.z-=(e.clientY-drag.y)/view.scale;drag={x:e.clientX,y:e.clientY};drawMap()};
+map.onlostpointercapture=()=>{drag=null};
+new ResizeObserver(drawMap).observe(map);
+setInterval(drawDetails,1000);
+async function refresh(){try{const r=await fetch('/api/fleet/positions',{credentials:'same-origin',cache:'no-store'});if(!r.ok){$('state').textContent=r.status===403?'Brak uprawnień — zaloguj się jako administrator lub dyspozytor.':'Błąd pobierania pozycji ('+r.status+')';return}const d=await r.json(),ps=d.positions||[];positions=ps.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));if(!view)fitMap();else drawMap();drawDetails();$('state').textContent=ps.length?'Pozycji: '+ps.length+' • dane z aplikacji kierowców':'Brak pozycji. Najpierw trzeba podłączyć plugin ETS2 i klienta Windows.';$('rows').innerHTML=ps.map(p=>`<tr><td>${esc(p.driver)}</td><td class="status">${p.online?'Online (sygnał)':'Offline'}</td><td>${esc(p.online?p.activity||"Nieznana":"Offline")}</td><td>${esc(p.speedKmh)} km/h</td><td>${esc([p.place||p.city,p.country].filter(Boolean).join(", ")||"Brak danych")}<br><small>Od: ${esc(p.activitySince?new Date(p.activitySince).toLocaleString("pl-PL"):"—")}</small></td><td>${esc(p.x)} / ${esc(p.z)}</td><td>${esc(new Date(p.updatedAt).toLocaleString('pl-PL'))}</td></tr>`).join('');}catch(e){$('state').textContent='Brak połączenia z serwerem.'}}refresh();setInterval(refresh,15000);
 
 let lastEvent=0,initialized=false;
 document.getElementById('enableNotifications').addEventListener('click',async()=>{
