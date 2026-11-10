@@ -98,6 +98,11 @@ async function save(db){
 }
 function send(res,code,obj,headers={}){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(obj))}
 function who(req){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1],v=token&&sessions.get(token);if(!v)return null;const account=accounts.get(v.username.toLowerCase());return v.expires>Date.now()&&account?.active?{...safeAccount(account),expires:v.expires}:null}
+function revokeAccountSessions(id){
+ for(const [token,session] of sessions){
+  if(session.id===id){sessions.delete(token);desktopSessions.delete(token)}
+ }
+}
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
 function canDispatch(req){return ['admin','dispatcher','boss'].includes(who(req)?.role)}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
@@ -478,8 +483,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!rate(req,'accounts-login',8))return send(res,429,{error:'Za dużo prób'});
   const a=await body(req),name=str(a.username,50).toLowerCase(),acct=accounts.get(name);
   const dummy=crypto.scryptSync(str(a.password,300),salt,64);
-  const candidate=acct?crypto.scryptSync(str(a.password,300),acct.salt,64):dummy;
-  const expected=acct?Buffer.from(acct.hash,'hex'):hash;
+  const candidate=acct?.active?crypto.scryptSync(str(a.password,300),acct.salt,64):dummy;
+  const expected=acct?.active?Buffer.from(acct.hash,'hex'):hash;
   if(!acct||!acct.active||!crypto.timingSafeEqual(candidate,expected))return send(res,401,{error:'Nieprawidłowy login lub hasło'});
   const token=crypto.randomBytes(32).toString('hex');sessions.set(token,{...safeAccount(acct),expires:Date.now()+12*3600000});
   const desktopToken=desktop?crypto.randomBytes(32).toString('hex'):undefined;if(desktop)desktopSessions.set(token,desktopToken);
@@ -507,7 +512,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/accounts/me'&&method==='GET')return send(res,200,{user:who(req)});
  if(u.pathname==='/api/accounts'&&method==='GET'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
-  return send(res,200,[...accounts.values()].map(safeAccount));
+  return send(res,200,[...accounts.values()].filter(a=>!a.deletedAt).map(safeAccount));
  }
  if(u.pathname==='/api/accounts'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
@@ -521,13 +526,28 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/accounts/update'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),acct=accounts.get(str(a.username,50).toLowerCase());
-  if(!acct)return send(res,404,{error:'Nie znaleziono konta'});
+  if(!acct||acct.deletedAt)return send(res,404,{error:'Nie znaleziono konta'});
   if(who(req).role!=='admin'&&(acct.role==='admin'||a.role==='admin'))return send(res,403,{error:'Tylko administrator może zarządzać kontami administratorów'});
-  if(acct.role==='admin'&&a.active===false)return send(res,400,{error:'Nie można zablokować administratora'});
+  if(a.active===false&&(acct.role==='admin'||acct.id===who(req).id))return send(res,400,{error:'Nie można zablokować administratora ani własnego konta'});
+  if(a.password!==undefined&&(typeof a.password!=='string'||a.password.length<12||a.password.length>300))return send(res,400,{error:'Hasło min. 12 znaków'});
   if(typeof a.active==='boolean')acct.active=a.active;
-  if(a.password!==undefined){if(typeof a.password!=='string'||a.password.length<12||a.password.length>300)return send(res,400,{error:'Hasło min. 12 znaków'});Object.assign(acct,passwordHash(a.password))}
+  if(a.password!==undefined)Object.assign(acct,passwordHash(a.password));
   if(a.role!==undefined&&ROLES.includes(a.role)&&acct.role!=='admin')acct.role=a.role;
+  if(!acct.active)revokeAccountSessions(acct.id);
   db.accounts=[...accounts.values()];await save(db);return send(res,200,safeAccount(acct));
+ }
+ if(u.pathname==='/api/accounts/delete'&&method==='POST'){
+  if(!auth(req))return send(res,403,{error:'Brak uprawnień do usuwania kont'});
+  const a=await body(req),acct=accounts.get(str(a.username,50).toLowerCase());
+  if(!acct||acct.deletedAt)return send(res,404,{error:'Nie znaleziono konta'});
+  if(!['driver','probation'].includes(acct.role)||acct.id===who(req).id)return send(res,403,{error:'Można usunąć wyłącznie konto kierowcy'});
+  acct.active=false;
+  acct.deletedAt=new Date().toISOString();
+  delete acct.hash;
+  delete acct.salt;
+  revokeAccountSessions(acct.id);
+  db.accounts=[...accounts.values()];await save(db);
+  return send(res,200,{ok:true});
  }
  if(u.pathname==='/api/me')return send(res,200,{admin:auth(req)});
  if(u.pathname.startsWith('/api/admin/')){
