@@ -278,6 +278,17 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const matches=candidates.filter(r=>r.acceptedAt&&validateJob(r,telemetry).match);
   const route=matches.length===1?matches[0]:null;
   const event={id:crypto.randomUUID(),eventKey,driver,companyId:me.companyId||MAIN_COMPANY_ID,type,telemetry,routeId:route?.id||null,matchStatus:route?'matched':'unmatched',checks:candidates.map(r=>({routeId:r.id,...validateJob(r,telemetry)})),verified:false,settlementAllowed:false,receivedAt:new Date().toISOString()};
+  if(route&&type==='job-delivered'&&Number.isFinite(telemetry.odometerKm)){
+   const previous=db.telemetryEvents.findLast(e=>e.routeId===route.id&&e.driver===driver&&e.companyId===event.companyId&&['job-started','job-delivered'].includes(e.type));
+   if(previous?.type==='job-started'&&Number.isFinite(previous.telemetry?.odometerKm)){
+    const distance=telemetry.odometerKm-previous.telemetry.odometerKm;
+    if(distance>=0&&distance<=100000){
+     event.distanceKm=Math.round(distance*10)/10;
+     route.drivenKm=Math.max(route.drivenKm||0,event.distanceKm);
+     if(route.drivenKm>0)route.status='W trasie';
+    }
+   }
+  }
   db.telemetryEvents.push(event);if(db.telemetryEvents.length>5000)db.telemetryEvents.splice(0,db.telemetryEvents.length-5000);
   await save(db);return send(res,201,{ok:true,event});
  }

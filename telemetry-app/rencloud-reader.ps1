@@ -21,7 +21,7 @@ function Report($message) {
 }
 Report 'Czytnik uruchomiony'
 $lastDelivered=$false
-$lastOnJob=$false
+$lastLoaded=$false
 $hadValidSample=$false
 $lastJob=$null
 # Nie tworz fikcyjnego zaladunku po samym starcie czytnika.
@@ -52,12 +52,13 @@ while($true) {
   $odometer=F32 $b 1056
   $onJob=($b[4300] -ne 0)
   $delivered=($b[4303] -ne 0)
+  $loaded=$onJob -and ($b[1564] -ne 0)
   $event=''
-  if($hadValidSample -and $onJob -and -not $lastOnJob){$event='job-started'}
+  if($hadValidSample -and $loaded -and -not $lastLoaded){$event='job-started'}
   if($hadValidSample -and $delivered -and -not $lastDelivered){$event='job-delivered'}
   $hadValidSample=$true
   $lastDelivered=$delivered
-  $lastOnJob=$onJob
+  $lastLoaded=$loaded
   $payload=@{
    speedKmh=[math]::Round($speed,2)
    cargoMassKg=[math]::Round([math]::Max(0,$cargoMass),1)
@@ -72,7 +73,7 @@ while($true) {
    worldY=(F64 $b 2208)
    worldZ=(F64 $b 2216)
    onJob=$onJob
-   cargoLoaded=($b[1564] -ne 0)
+   cargoLoaded=$loaded
    paused=($b[4] -ne 0)
    event=$event
   }

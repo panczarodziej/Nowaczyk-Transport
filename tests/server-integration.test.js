@@ -74,10 +74,10 @@ test('login → dispatch → nested export → telemetry → driver panel and de
 assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.company,'transinet');
  assert.equal(exported.data.cargo.name,'Palety');assert.equal(exported.data.cargo.id,'pallets');
  const packet={x:12,z:45,speedKmh:54,activity:'Jazda',cargo:'pallets',cargoMassKg:18000,onJob:true,cargoLoaded:true};assert.equal((await req('/api/fleet/position',packet,login.cookie)).status,200);
- const event={type:'job-started',eventKey:'test-event-123456',sourceCity:'Krakow',destinationCity:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'pallets',cargoMassKg:18000};
+ const event={odometerKm:1000,type:'job-started',eventKey:'test-event-123456',sourceCity:'Krakow',destinationCity:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'pallets',cargoMassKg:18000};
  assert.equal((await req('/api/telemetry/events',event,login.cookie)).data.event.matchStatus,'matched');assert.equal((await req('/api/telemetry/events',event,login.cookie)).data.duplicate,true);
  assert.equal((await req('/api/telemetry/events',{...event,eventKey:'bad-mass-123456',cargoMassKg:12000},login.cookie)).data.event.matchStatus,'unmatched');
- const delivered={...event,type:'job-delivered',eventKey:'delivery-event-123456'};
+ const delivered={...event,odometerKm:1602.3,type:'job-delivered',eventKey:'delivery-event-123456'};
  const delivery=await req('/api/telemetry/events',delivered,desktop.cookie);
  assert.equal(delivery.status,201);
  assert.equal(delivery.data.event.routeId,assigned.data.id);
@@ -85,6 +85,7 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/telemetry/events',delivered,desktop.cookie)).data.duplicate,true);
  const events=await req('/api/telemetry/events',null,dispatcher.cookie);
  assert.equal(events.data.at(-1).type,'job-delivered');
+ assert.equal(events.data.at(-1).distanceKm,602.3);
  const me=await req('/api/telemetry/me',null,login.cookie);assert.equal(me.data.position.cargoMassKg,18000);assert.equal(me.data.events.length,3);assert.equal((await req('/api/fleet/positions',null,login.cookie)).status,403);
  // Parallel writes must not overwrite each other in the single-process store.
  const writes=await Promise.all(Array.from({length:6},(_,i)=>req('/api/routes',{...route,to:'City'+i},admin.cookie)));assert.ok(writes.every(x=>x.status===201));assert.equal((await req('/api/routes',null,admin.cookie)).data.length,9);
