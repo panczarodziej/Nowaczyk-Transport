@@ -77,7 +77,7 @@ async function save(db){
  const temp=DB+'.tmp';fs.writeFileSync(temp,JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(temp,DB);
 }
 function send(res,code,obj,headers={}){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(obj))}
-function who(req){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1],v=token&&sessions.get(token);if(!v)return null;if(typeof v==='number')return v>Date.now()?{role:'admin',username:'admin'}:null;const account=accounts.get(v.username.toLowerCase());return v.expires>Date.now()&&account?.active?{...safeAccount(account),expires:v.expires}:null}
+function who(req){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1],v=token&&sessions.get(token);if(!v)return null;const account=accounts.get(v.username.toLowerCase());return v.expires>Date.now()&&account?.active?{...safeAccount(account),expires:v.expires}:null}
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
 function canDispatch(req){return ['admin','dispatcher','boss'].includes(who(req)?.role)}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
@@ -402,7 +402,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/accounts/password'&&method==='POST'){
   const me=who(req),account=me?.id&&accounts.get(me.username.toLowerCase());
   if(!account)return send(res,401,{error:'Zaloguj się na swoje konto'});
-  if(!['driver','probation'].includes(account.role))return send(res,403,{error:'Zmiana hasła w tym panelu jest dostępna dla kierowców.'});
+  if(!canDrive(req))return send(res,403,{error:'Brak dostępu do ustawień konta.'});
   if(!rate(req,'change-password:'+account.id,6))return send(res,429,{error:'Za dużo prób. Spróbuj za minutę.'});
   const a=await body(req),current=str(a.currentPassword,300),next=a.newPassword;
   if(typeof next!=='string'||next.length<12||next.length>300||next!==next.trim())return send(res,400,{error:'Nowe hasło musi mieć od 12 do 300 znaków, bez spacji na początku i końcu.'});
@@ -442,13 +442,6 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(a.role!==undefined&&ROLES.includes(a.role)&&acct.role!=='admin')acct.role=a.role;
   db.accounts=[...accounts.values()];await save(db);return send(res,200,safeAccount(acct));
  }
- if(u.pathname==='/api/login'&&method==='POST'){
-  if(!rate(req,'login',8))return send(res,429,{error:'Za dużo prób.'});
-  const a=await body(req),candidate=crypto.scryptSync(str(a.password,500),salt,64);
-  if(!crypto.timingSafeEqual(candidate,hash))return send(res,401,{error:'Nieprawidłowe hasło'});
-  const token=crypto.randomBytes(32).toString('hex');sessions.set(token,Date.now()+12*3600000);
-  return send(res,200,{ok:true},{'Set-Cookie':`ks_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${process.env.COOKIE_SECURE==='1'?'; Secure':''}`});
- }
  if(u.pathname==='/api/me')return send(res,200,{admin:auth(req)});
  if(u.pathname.startsWith('/api/admin/')){
   if(!auth(req))return send(res,401,{error:'Zaloguj się jako administrator.'});
@@ -476,6 +469,10 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(method!=='GET')return send(res,405,{error:'Metoda niedozwolona'});
  if(u.pathname==='/' || u.pathname==='/system' || u.pathname==='/index.html' || u.pathname==='/login.html') {res.writeHead(302,{Location:'/system-login.html'});return res.end()}
+ if(u.pathname==='/admin.html'&&!auth(req)){
+  if(who(req))return send(res,403,{error:'Panel rekrutacji jest dostępny dla kierownictwa.'});
+  res.writeHead(302,{Location:'/system-login.html'});return res.end();
+ }
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:who(req)?'/moj-panel.html':'/system-login.html'});return res.end()}
  if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/flota-online.html'&&!canDispatch(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);

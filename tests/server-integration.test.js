@@ -70,5 +70,10 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/accounts/me',null,desktop.cookie)).data.user,null);
  assert.equal((await req('/api/accounts/login',{username:'driver1',password:'driver-password-only'})).status,401);
  assert.equal((await req('/api/accounts/login',{username:'driver1',password:'driver-new-password'})).status,200);
+ assert.equal((await fetch(base+'/admin.html',{headers:{Cookie:dispatcher.cookie}})).status,200);
+ assert.equal((await req('/api/admin/companies',null,dispatcher.cookie)).status,200);
+ assert.equal((await req('/api/accounts/password',{currentPassword:'dispatcher-password-only',newPassword:'boss-new-password'},dispatcher.cookie)).status,200);
+ assert.equal((await req('/api/accounts/login',{username:'dispatcher1',password:'boss-new-password'})).status,200);
+ assert.equal((await req('/api/login',{password:'integration-password-only'})).status,405);
  }finally{child.kill();await new Promise(resolve=>child.once('exit',resolve));fs.rmSync(dir,{recursive:true,force:true})}
 });
