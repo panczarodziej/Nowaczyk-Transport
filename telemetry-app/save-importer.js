@@ -62,11 +62,14 @@ function plan(text,job,ramps){
  const player=list.find(unit=>unit.type==='player');
  if(ramps){
   if(!player||field(player,'current_job')!=='null'||field(player,'selected_job')!=='null')throw Error('Zakończ aktywne zlecenie i usuń wybraną ofertę przed importem.');
-  const ref=field(player,'assigned_trailer');
+  const vehiclesRef=field(player,'assigned_vehicles');
+  const vehicles=list.find(unit=>unit.type==='player_vehicles'&&unit.id===vehiclesRef);
+  const ref=vehicles?field(vehicles,'trailer'):field(player,'assigned_trailer');
   const trailer=list.find(unit=>unit.type==='trailer'&&unit.id===ref);
   const definition=definitions.get(trailer&&field(trailer,'trailer_definition'));
   const body=definition&&field(definition,'body_type');
-  if(!trailer||field(player,'my_trailer_attached')!=='true'||field(player,'my_trailer')!==ref)throw Error('Podepnij własną naczepę i wykonaj ręczny zapis.');
+  const attached=vehicles?ref&&ref!=='null':field(player,'my_trailer_attached')==='true'&&field(player,'my_trailer')===ref;
+  if(!trailer||!attached)throw Error('W wybranym zapisie nie ma aktywnej własnej naczepy. Podepnij ją, wykonaj ręczny zapis i wskaż jego game.sii.');
   if(field(trailer,'slave_trailer')!=='null')throw Error('Tryb własnej naczepy obsługuje pojedynczą naczepę.');
   const ownType=Object.values(allowedTypes).find(([type])=>type===body);
   if(!ownType||(expected&&expected!==ownType))throw Error('Typ podpiętej naczepy nie pasuje do zlecenia.');

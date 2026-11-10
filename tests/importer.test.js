@@ -69,3 +69,34 @@ player_job : _active {
   assert.throws(()=>readLoadingPoint(file,{city:'berlin',company:'transinet'}),/tej samej firmy/);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
+test('owned trailer import supports modern player_vehicles and legacy fields',()=>{
+ const fixture=text.replace(/\n}\s*$/, `
+player : _player {
+ current_job: null
+ selected_job: null
+ assigned_vehicles: _vehicles
+}
+player_vehicles : _vehicles {
+ vehicle: _truck
+ trailer: _trailer
+}
+trailer : _trailer {
+ trailer_definition: _owned
+ slave_trailer: null
+}
+trailer_def : _owned {
+ body_type: curtainside
+}
+trailer_def : trailer_def.scs.box {
+ body_type: curtainside
+}
+}`);
+ const point='(1, 2, 3)(1; 0, 0, 0)';
+ const ownedJob={...job,trailerType:'firanka',to:{...job.to,deliveryPlacements:{easy:[point]}}};
+ const modern=plan(fixture,ownedJob,{source:point});
+ assert.match(modern.text,/is_cargo_market_job: true/);
+ assert.match(modern.text,/is_trailer_loaded: false/);
+ const legacy=fixture.replace(' assigned_vehicles: _vehicles',' assigned_trailer: _trailer\n my_trailer: _trailer\n my_trailer_attached: true');
+ assert.match(plan(legacy,ownedJob,{source:point}).text,/is_cargo_market_job: true/);
+ assert.throws(()=>plan(fixture.replace(' trailer: _trailer',' trailer: null'),ownedJob,{source:point}),/nie ma aktywnej/);
+});
