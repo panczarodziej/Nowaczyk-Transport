@@ -53,6 +53,12 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  const otherRoute=await req('/api/routes',{...route,driver:'other-driver'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:otherRoute.data.id},desktop.cookie,desktopHeaders)).status,403);
  const second=await req('/api/routes',{...route,to:'Poznan'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:second.data.id},desktop.cookie,desktopHeaders)).status,200);
  const meDesktop=await req('/api/accounts/me',null,desktop.cookie);assert.equal(meDesktop.data.user.desktopToken,undefined);
+ for(const path of ['/','/index.html','/system-login.html']){
+  const back=await fetch(base+path,{headers:{Cookie:dispatcher.cookie},redirect:'manual'});
+  assert.equal(back.headers.get('location'),'/system.html');
+ }
+ const driverHome=await fetch(base+'/system-login.html',{headers:{Cookie:login.cookie},redirect:'manual'});
+ assert.equal(driverHome.headers.get('location'),'/moj-panel.html');
  const panel=await fetch(base+'/system.html',{headers:{Cookie:admin.cookie}});assert.equal(panel.status,200);assert.match(await panel.text(),/href="\/uzytkownicy.html"/);
  for(const mapProfile of ['promods','promods-pr']){
   assert.equal((await req('/api/driver/map-profile',{mapProfile},desktop.cookie)).status,200);

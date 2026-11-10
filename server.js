@@ -485,7 +485,10 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,404,{error:'Nie znaleziono'});
  }
  if(method!=='GET')return send(res,405,{error:'Metoda niedozwolona'});
- if(u.pathname==='/' || u.pathname==='/system' || u.pathname==='/index.html' || u.pathname==='/login.html') {res.writeHead(302,{Location:'/system-login.html'});return res.end()}
+ const homePath=auth(req)?'/system.html':canDispatch(req)?'/spedytor.html':canDrive(req)?'/moj-panel.html':'/system-login.html';
+ if(['/','/system','/index.html','/login.html'].includes(u.pathname)||(u.pathname==='/system-login.html'&&homePath!==u.pathname)){
+  res.writeHead(302,{Location:homePath,'Cache-Control':'no-store'});return res.end();
+ }
  if(u.pathname==='/admin.html'&&!auth(req)){
   if(who(req))return send(res,403,{error:'Panel rekrutacji jest dostępny dla kierownictwa.'});
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
@@ -494,7 +497,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(who(req))return send(res,403,{error:'Mapa floty jest dostępna dla dyspozytorni.'});
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
  }
- if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:who(req)?'/moj-panel.html':'/system-login.html'});return res.end()}
+ if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:homePath});return res.end()}
  if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/flota-online.html'&&!canDispatch(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);
  if(file==='stanowisko.html'){res.writeHead(302,{Location:canDispatch(req)?'/spedytor.html':'/system-login.html'});return res.end()}
