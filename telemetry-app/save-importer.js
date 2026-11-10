@@ -27,7 +27,7 @@ function units(text){
 }
 function field(unit,key){const m=unit.text.match(new RegExp('^\\s*'+key+':\\s*([^\\r\\n]+)','m'));return m?m[1].trim().replace(/^"|"$/g,''):null}
 function replaceField(text,key,value){const re=new RegExp('^(\\s*'+key+':\\s*)[^\\r\\n]+','m');if(!re.test(text))throw Error('Brak pola '+key+' — zapis nieobsługiwany');return text.replace(re,(_,prefix)=>prefix+value)}
-function plan(text,job){
+function plan(text,job,ramps){
  const list=units(text),source=job.from||{},dest=job.to||{},cargo=job.cargo||{};
  if(!source.company||!source.city||!dest.company||!dest.city||!cargo.name)throw Error('Dyspozytor musi podać obie firmy, oba miasta i towar.');
  const companies=list.filter(u=>u.type==='company'&&u.id.startsWith('company.volatile.'));
@@ -37,7 +37,20 @@ function plan(text,job){
  const refs=new Set([...from.text.matchAll(/^\s*job_offer\[\d+\]:\s*(\S+)/gm)].map(m=>m[1]));
  const definitions=new Map(list.filter(unit=>unit.type==='trailer_def').map(unit=>[unit.id,unit]));
  const allowedTypes={firanka:['curtainside',/(?:^|\.)curtain(?:_|$)/i],chlodnia:['refrigerated',/(?:^|\.)reefer(?:_|$)/i]};
- const expected=Object.hasOwn(allowedTypes,job.trailerType)?allowedTypes[job.trailerType]:null;
+ let expected=Object.hasOwn(allowedTypes,job.trailerType)?allowedTypes[job.trailerType]:null;
+ const player=list.find(unit=>unit.type==='player');
+ if(ramps){
+  if(!player||field(player,'current_job')!=='null'||field(player,'selected_job')!=='null')throw Error('Zakończ aktywne zlecenie i usuń wybraną ofertę przed importem.');
+  const ref=field(player,'assigned_trailer');
+  const trailer=list.find(unit=>unit.type==='trailer'&&unit.id===ref);
+  const definition=definitions.get(trailer&&field(trailer,'trailer_definition'));
+  const body=definition&&field(definition,'body_type');
+  if(!trailer||field(player,'my_trailer_attached')!=='true'||field(player,'my_trailer')!==ref)throw Error('Podepnij własną naczepę i wykonaj ręczny zapis.');
+  if(field(trailer,'slave_trailer')!=='null')throw Error('Tryb własnej naczepy obsługuje pojedynczą naczepę.');
+  const ownType=Object.values(allowedTypes).find(([type])=>type===body);
+  if(!ownType||(expected&&expected!==ownType))throw Error('Typ podpiętej naczepy nie pasuje do zlecenia.');
+  expected=ownType;
+ }
  const options=list.filter(offer=>{
   if(offer.type!=='job_offer_data'||!refs.has(offer.id)||!field(offer,'units_count'))return false;
   const ref=field(offer,'trailer_definition');
@@ -56,12 +69,34 @@ function plan(text,job){
  }
  const km=Number(job.plannedKm);if(!Number.isSafeInteger(km)||km<=0||km>30000)throw Error('Zlecenie musi mieć całkowity dystans 1–30000 km');
  const economy=list.find(u=>u.type==='economy');const clock=Number(economy&&field(economy,'game_time'));if(!Number.isSafeInteger(clock)||clock<0)throw Error('Brak czasu gry w zapisie');
+ if(ramps){
+  function placement(company){
+   const [name,city]=company.id.slice(17).split('.');
+   const matches=ramps.filter(r=>r?.company_name===name&&r.city_name===city);
+   const points=matches.length===1?matches[0].placements:null;
+   const easy=points?.easy?.[0];
+   const valid=value=>typeof value==='string'&&/^\([0-9&., +eEabcdefA-F-]+\)\s*\([0-9&.,; +eEabcdefA-F-]+\)$/.test(value);
+   if(!valid(easy)||easy.includes('&60ad78ec'))throw Error('Brak jednoznacznej rampy: '+company.id.slice(17));
+   return [easy,...['medium','hard'].map(type=>valid(points[type]?.[0])&&!points[type][0].includes('&60ad78ec')?points[type][0]:easy)];
+  }
+  const [sourcePlacement]=placement(from);
+  const [target,medium,hard]=placement(to);
+  const numbers={units_count:Number(field(slot,'units_count')),ferry_time:Number(field(slot,'ferry_time')||0),ferry_price:Number(field(slot,'ferry_price')||0),urgency:Number(field(slot,'urgency')||0)};
+  if(Object.values(numbers).some(n=>!Number.isSafeInteger(n)||n<0)||!numbers.units_count)throw Error('Nieprawidłowe dane wzorcowej oferty ETS2.');
+  const id='_nameless.aaa.'+crypto.randomBytes(2).toString('hex')+'.'+crypto.randomBytes(2).toString('hex');
+  if(list.some(unit=>unit.id===id))throw Error('Konflikt identyfikatora zlecenia. Spróbuj ponownie.');
+  const properties={company_truck:'null',company_trailer:'null',target_placement:target,target_placement_medium:medium,target_placement_hard:hard,target_placement_rigid:'(0, &60ad78ec, 0) (1; 0, 0, 0)',source_placement:sourcePlacement,selected_target:'nil',time_lower_limit:clock+6000,time_upper_limit:clock+8000,job_distance:0,fuel_consumed:0,last_reported_fuel:0,total_fines:0,is_trailer_loaded:'false',online_job_id:'nil',online_job_trailer_model:'null',autoload_used:'false',cargo:field(slot,'cargo'),source_company:from.id,target_company:to.id,is_articulated:'false',is_cargo_market_job:'true',start_time:clock,planned_distance_km:km,special:'null',fill_ratio:1,...numbers};
+  const changed=text.slice(0,player.start)+replaceField(player.text,'current_job',id)+text.slice(player.end);
+  const end=changed.lastIndexOf('}');
+  const jobUnit='\nplayer_job : '+id+' {\n'+Object.entries(properties).map(([key,value])=>' '+key+': '+value).join('\n')+'\n}\n';
+  return {text:changed.slice(0,end)+jobUnit+changed.slice(end),notice:'Aktywne zlecenie zapisane. Wczytaj zmieniony zapis w ETS2 i sprawdź punkt załadunku.'};
+ }
  const target=to.id.slice(17);let replacement=replaceField(slot.text,'target',JSON.stringify(target));replacement=replaceField(replacement,'expiration_time',clock+7*24*60);replacement=replaceField(replacement,'shortest_distance_km',km);
  return {text:text.slice(0,slot.start)+replacement+text.slice(slot.end),offerId:slot.id,source:from.id,target:to.id,unitsCount:Number(field(slot,'units_count')),notice:'Oferta zapisana. Wczytaj zmieniony zapis w ETS2 i odbierz ładunek w firmie. Masa wynika z definicji towaru i zachowanej liczby jednostek; system porówna ją z tonami zlecenia.'};
 }
-function importFile(file,job){
+function importFile(file,job,ramps){
  if(path.basename(file).toLowerCase()!=='game.sii')throw Error('Wybierz plik game.sii');
- const bytes=fs.readFileSync(file);if(bytes.length>maxSaveBytes)throw Error('Zapis zbyt duży');const original=decodeSave(bytes);const result=plan(original,job);
+ const bytes=fs.readFileSync(file);if(bytes.length>maxSaveBytes)throw Error('Zapis zbyt duży');const original=decodeSave(bytes);const result=plan(original,job,ramps);
  if(!fs.readFileSync(file).equals(bytes))throw Error('Gra zmieniła zapis podczas importu. Wróć do menu profili.');
  const suffix=Date.now()+'-'+crypto.randomBytes(4).toString('hex'),backup=file+'.nowaczyk-'+suffix+'.bak',tmp=file+'.nowaczyk-'+suffix+'.tmp';
  fs.copyFileSync(file,backup,fs.constants.COPYFILE_EXCL);
