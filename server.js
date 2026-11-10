@@ -315,8 +315,34 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const r=(db.routes||[]).find(x=>x.id===u.searchParams.get('id'));
   if(!r)return send(res,404,{error:'Nie znaleziono zlecenia'});
   if(!canDispatch(req)&&(r.driver.toLowerCase()!==me.username.toLowerCase()||r.companyId!==me.companyId))return send(res,403,{error:'Brak dostępu'});
-  const job={mapProfile:(db.driverMapProfiles||{})[r.driver.toLowerCase()]||'promods-pr',schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:r.from,company:r.sourceCompany||''},to:{country:r.toCountry||'',city:r.to,company:r.destinationCompany||''},cargo:{name:r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
+  const mapProfile=(db.driverMapProfiles||{})[r.driver.toLowerCase()]||'promods-pr';
+  const {europe,poland,middleEast}=require('./public/ets2-catalog.json');
+  const cities={...europe,...middleEast,...(mapProfile==='promods-pr'?poland:{})};
+  const normalize=value=>String(value).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').replace(/ł/g,'l').trim();
+  function cityId(name){
+   const key=normalize(name);
+   if(Object.hasOwn(cities,key))return key;
+   const matches=Object.entries(cities).filter(([,city])=>normalize(city[0])===key);
+   return matches.length===1?matches[0][0]:name;
+  }
+  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:cityId(r.from),company:r.sourceCompany||''},to:{country:r.toCountry||'',city:cityId(r.to),company:r.destinationCompany||''},cargo:{name:r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="ks-job-'+r.id+'.json"','Cache-Control':'no-store'});return res.end(JSON.stringify(job,null,2));
+ }
+ if(u.pathname==='/api/routes/assignees'&&method==='GET'){
+  if(!canDispatch(req))return send(res,403,{error:'Brak dostępu do listy kierowców'});
+  return send(res,200,[...accounts.values()].filter(a=>a.active&&(['admin','driver','probation'].includes(a.role)||(a.role==='boss'&&a.companyId===MAIN_COMPANY_ID))).map(a=>a.username).sort());
+ }
+ if(u.pathname==='/api/routes/archive'&&method==='POST'){
+  if(!canDispatch(req))return send(res,403,{error:'Brak dostępu do usuwania tras'});
+  const {id}=await body(req),index=(db.routes||[]).findIndex(route=>route.id===id);
+  if(index<0)return send(res,404,{error:'Nie znaleziono trasy'});
+  const route=db.routes[index];
+  if(route.status==='Zakończona'||(db.expenses||[]).some(expense=>expense.routeId===id))return send(res,409,{error:'Trasa zakończona lub ma zapisane koszty.'});
+  db.archivedRoutes??=[];
+  db.archivedRoutes.push({...route,archivedAt:new Date().toISOString()});
+  db.routes.splice(index,1);
+  await save(db);
+  return send(res,200,{ok:true});
  }
  if(u.pathname==='/api/routes'&&method==='GET'){
   if(!who(req))return send(res,401,{error:'Zaloguj się'});
@@ -327,6 +353,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDispatch(req))return send(res,403,{error:'Trasy może przydzielać lub aktualizować Szef, Spedytor albo Administrator.'});
   const a=await body(req),from=str(a.from,120),to=str(a.to,120),driver=str(a.driver,100);
   if(!from||!to||!driver)return send(res,400,{error:'Podaj kierowcę, początek i koniec trasy'});
+  const account=accounts.get(driver.toLowerCase());
+  if(!account?.active||!(['admin','driver','probation'].includes(account.role)||(account.role==='boss'&&account.companyId===MAIN_COMPANY_ID)))return send(res,400,{error:'Wybierz aktywne konto z listy kierowców'});
   const plannedKm=Number(a.plannedKm);
   if(!Number.isFinite(plannedKm)||plannedKm<0||plannedKm>20000)return send(res,400,{error:'Nieprawidłowy dystans'});
   const freight=Number(a.freight||0);if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
@@ -335,7 +363,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(trailerId&&!trailer)return send(res,400,{error:'Nie znaleziono przypisanej naczepy'});
   if(trailer&&trailer.assigneeUsername&&trailer.assigneeUsername.toLowerCase()!==driver.toLowerCase())return send(res,409,{error:'Naczepa jest przypisana do innego kierowcy lub podwykonawcy'});
   const sourceCompany=str(a.sourceCompany,120),destinationCompany=str(a.destinationCompany,120);
-  const r={id:crypto.randomUUID(),trailerId:trailerId||null,freight,companyId:str(a.companyId,80)||MAIN_COMPANY_ID,driver,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
+  const r={id:crypto.randomUUID(),trailerId:trailerId||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
   db.routes??=[];db.routes.push(r);await save(db);return send(res,201,r);
  }
  if(u.pathname==='/api/routes/progress'&&method==='POST'){

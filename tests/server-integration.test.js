@@ -52,6 +52,8 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},desktop.cookie,desktopHeaders)).data.duplicate,true);
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,desktopHeaders)).status,403);
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},desktop.cookie,{...desktopHeaders,Origin:base})).status,403);
+ assert.equal((await req('/api/routes',{...route,driver:'unknown'},admin.cookie)).status,400);
+ assert.equal((await req('/api/accounts',{username:'other-driver',password:'other-driver-password',role:'driver'},admin.cookie)).status,201);
  const otherRoute=await req('/api/routes',{...route,driver:'other-driver'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:otherRoute.data.id},desktop.cookie,desktopHeaders)).status,403);
  const second=await req('/api/routes',{...route,to:'Poznan'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:second.data.id},desktop.cookie,desktopHeaders)).status,200);
  const meDesktop=await req('/api/accounts/me',null,desktop.cookie);assert.equal(meDesktop.data.user.desktopToken,undefined);
@@ -85,6 +87,9 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const me=await req('/api/telemetry/me',null,login.cookie);assert.equal(me.data.position.cargoMassKg,18000);assert.equal(me.data.events.length,3);assert.equal((await req('/api/fleet/positions',null,login.cookie)).status,403);
  // Parallel writes must not overwrite each other in the single-process store.
  const writes=await Promise.all(Array.from({length:6},(_,i)=>req('/api/routes',{...route,to:'City'+i},admin.cookie)));assert.ok(writes.every(x=>x.status===201));assert.equal((await req('/api/routes',null,admin.cookie)).data.length,9);
+ assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},login.cookie)).status,403);
+ assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},admin.cookie)).status,200);
+ assert.equal((await req('/api/routes/export?id='+otherRoute.data.id,null,admin.cookie)).status,404);
  const link=await fetch(base+'/trasy.html',{headers:{Cookie:login.cookie},redirect:'manual'});
  assert.equal(link.headers.get('location'),'/moj-panel.html#routes');
  assert.equal((await req('/api/accounts/password',{currentPassword:'incorrect',newPassword:'driver-new-password'},login.cookie)).status,403);
