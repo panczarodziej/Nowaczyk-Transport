@@ -367,15 +367,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/fleet'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const fleet=db.fleet||[];
-  if(auth(req))return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>['driver','probation','admin'].includes(a.role)&&a.active).map(safeAccount)});
+  if(auth(req))return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{fleet:fleet.filter(v=>v.driverAccountId===me.id&&v.companyId===me.companyId)});
  }
  if(u.pathname==='/api/fleet'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),plate=str(a.plate,30).toUpperCase(),model=str(a.model,100),trailerPlate=str(a.trailerPlate,30).toUpperCase(),trailerModel=str(a.trailerModel,100),driverAccountId=str(a.driverAccountId,80),id=str(a.id,80);
   if(!plate||!model)return send(res,400,{error:'Podaj rejestrację i model ciągnika'});
-  const acct=[...accounts.values()].find(x=>x.id===driverAccountId&&x.active&&['driver','probation','admin'].includes(x.role));
-  if(driverAccountId&&!acct)return send(res,400,{error:'Wybierz aktywne konto kierowcy'});
+  const acct=[...accounts.values()].find(x=>x.id===driverAccountId&&x.active);
+  if(driverAccountId&&!acct)return send(res,400,{error:'Wybierz aktywne konto pracownika'});
   db.fleet??=[];
   if(db.fleet.some(x=>x.plate===plate&&x.id!==id))return send(res,409,{error:'Taka rejestracja już istnieje'});
   if(driverAccountId&&db.fleet.some(x=>x.driverAccountId===driverAccountId&&x.id!==id))return send(res,409,{error:'Ten kierowca ma już przypisany pojazd'});
