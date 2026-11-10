@@ -147,7 +147,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/trailers'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const list=db.trailers||[];
-  if(['admin','dispatcher','boss'].includes(me.role))return send(res,200,{trailers:list,assignees:[...accounts.values()].filter(a=>a.active&&['driver','probation','subcontractor'].includes(a.role)).map(safeAccount)});
+  if(['admin','dispatcher','boss'].includes(me.role))return send(res,200,{trailers:list,assignees:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{trailers:list.filter(t=>t.assigneeId===me.id)});
  }
  if(u.pathname==='/api/trailers'&&method==='POST'){
@@ -155,8 +155,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const a=await body(req),id=str(a.id,80),plate=str(a.plate,30).toUpperCase(),model=str(a.model,100),type=str(a.type,60),assigneeId=str(a.assigneeId,80),ownerCompanyId=str(a.ownerCompanyId,80)||MAIN_COMPANY_ID;
   if(!plate||!model||!['firanka','chlodnia','platforma','kontener','inna'].includes(type))return send(res,400,{error:'Podaj rejestrację, model i rodzaj naczepy'});
   if(!db.companies.some(c=>c.id===ownerCompanyId))return send(res,400,{error:'Nieznana firma właściciela'});
-  const assignee=assigneeId?[...accounts.values()].find(x=>x.id===assigneeId&&x.active&&['driver','probation','subcontractor'].includes(x.role)):null;
-  if(assigneeId&&!assignee)return send(res,400,{error:'Wybierz aktywnego kierowcę lub podwykonawcę'});
+  const assignee=assigneeId?[...accounts.values()].find(x=>x.id===assigneeId&&x.active):null;
+  if(assigneeId&&!assignee)return send(res,400,{error:'Wybierz aktywne konto pracownika'});
   db.trailers??=[];
   if(db.trailers.some(t=>t.plate===plate&&t.id!==id))return send(res,409,{error:'Naczepa o tej rejestracji już istnieje'});
   let t=id?db.trailers.find(t=>t.id===id):null;
