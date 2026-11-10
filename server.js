@@ -399,6 +399,24 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,200,{ok:true,user:safeAccount(acct),desktopToken},{'Set-Cookie':`ks_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${process.env.COOKIE_SECURE==='1'?'; Secure':''}`});
  }
  if(u.pathname==='/api/logout'&&method==='POST'){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1];if(token){sessions.delete(token);desktopSessions.delete(token)}return send(res,200,{ok:true},{'Set-Cookie':'ks_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'})}
+ if(u.pathname==='/api/accounts/password'&&method==='POST'){
+  const me=who(req),account=me?.id&&accounts.get(me.username.toLowerCase());
+  if(!account)return send(res,401,{error:'Zaloguj się na swoje konto'});
+  if(!['driver','probation'].includes(account.role))return send(res,403,{error:'Zmiana hasła w tym panelu jest dostępna dla kierowców.'});
+  if(!rate(req,'change-password:'+account.id,6))return send(res,429,{error:'Za dużo prób. Spróbuj za minutę.'});
+  const a=await body(req),current=str(a.currentPassword,300),next=a.newPassword;
+  if(typeof next!=='string'||next.length<12||next.length>300||next!==next.trim())return send(res,400,{error:'Nowe hasło musi mieć od 12 do 300 znaków, bez spacji na początku i końcu.'});
+  const candidate=crypto.scryptSync(current,account.salt,64);
+  if(!crypto.timingSafeEqual(candidate,Buffer.from(account.hash,'hex')))return send(res,403,{error:'Obecne hasło jest nieprawidłowe.'});
+  const updated={...account,...passwordHash(next)};
+  db.accounts=[...accounts.values()].map(x=>x.id===account.id?updated:x);
+  await save(db);
+  accounts.set(account.username.toLowerCase(),updated);
+  for(const [token,session] of sessions){
+   if(session.id===account.id){sessions.delete(token);desktopSessions.delete(token)}
+  }
+  return send(res,200,{ok:true},{'Set-Cookie':'ks_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'+(process.env.COOKIE_SECURE==='1'?'; Secure':'')});
+ }
  if(u.pathname==='/api/accounts/me'&&method==='GET')return send(res,200,{user:who(req)});
  if(u.pathname==='/api/accounts'&&method==='GET'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
@@ -459,7 +477,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(method!=='GET')return send(res,405,{error:'Metoda niedozwolona'});
  if(u.pathname==='/' || u.pathname==='/system' || u.pathname==='/index.html' || u.pathname==='/login.html') {res.writeHead(302,{Location:'/system-login.html'});return res.end()}
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:who(req)?'/moj-panel.html':'/system-login.html'});return res.end()}
- if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/flota-online.html'&&!canDispatch(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
+ if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/flota-online.html'&&!canDispatch(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);
  if(file==='stanowisko.html'){res.writeHead(302,{Location:canDispatch(req)?'/spedytor.html':'/system-login.html'});return res.end()}
  if(file==='pracownik.html'){res.writeHead(302,{Location:'/driver.html'});return res.end()}

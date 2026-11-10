@@ -63,5 +63,12 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const me=await req('/api/telemetry/me',null,login.cookie);assert.equal(me.data.position.cargoMassKg,18000);assert.equal(me.data.events.length,3);assert.equal((await req('/api/fleet/positions',null,login.cookie)).status,403);
  // Parallel writes must not overwrite each other in the single-process store.
  const writes=await Promise.all(Array.from({length:6},(_,i)=>req('/api/routes',{...route,to:'City'+i},admin.cookie)));assert.ok(writes.every(x=>x.status===201));assert.equal((await req('/api/routes',null,admin.cookie)).data.length,9);
+ const link=await fetch(base+'/trasy.html',{headers:{Cookie:login.cookie},redirect:'manual'});
+ assert.equal(link.headers.get('location'),'/moj-panel.html#routes');
+ assert.equal((await req('/api/accounts/password',{currentPassword:'incorrect',newPassword:'driver-new-password'},login.cookie)).status,403);
+ assert.equal((await req('/api/accounts/password',{currentPassword:'driver-password-only',newPassword:'driver-new-password'},login.cookie)).status,200);
+ assert.equal((await req('/api/accounts/me',null,desktop.cookie)).data.user,null);
+ assert.equal((await req('/api/accounts/login',{username:'driver1',password:'driver-password-only'})).status,401);
+ assert.equal((await req('/api/accounts/login',{username:'driver1',password:'driver-new-password'})).status,200);
  }finally{child.kill();await new Promise(resolve=>child.once('exit',resolve));fs.rmSync(dir,{recursive:true,force:true})}
 });
