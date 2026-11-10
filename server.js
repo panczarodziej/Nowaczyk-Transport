@@ -90,7 +90,7 @@ let mutationTail=Promise.resolve();
 const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].includes(req.method)){const previous=mutationTail;mutationTail=new Promise(resolve=>{release=resolve});await previous}try{
  const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();
  // Centrum floty: dane pozycji z uwierzytelnionego konta; NIE jest to jeszcze integracja z ETS2.
- if(u.pathname==='/api/client-release'&&method==='GET'){let url='https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download/Nowaczyk-Transport-Setup.exe';try{const candidate=new URL(process.env.TELEMETRY_DOWNLOAD_URL||'');if(candidate.protocol==='https:')url=candidate.href}catch{}return send(res,200,{version:'0.3.3',available:!!url,url})}
+ if(u.pathname==='/api/client-release'&&method==='GET'){let url='https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download/Nowaczyk-Transport-Setup.exe';try{const candidate=new URL(process.env.TELEMETRY_DOWNLOAD_URL||'');if(candidate.protocol==='https:')url=candidate.href}catch{}return send(res,200,{version:'0.3.4',available:!!url,url})}
  if(u.pathname==='/api/telemetry/me'&&method==='GET'){const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});const p=db.fleetPositions?.[me.username.toLowerCase()]||null;return send(res,200,{position:p,online:!!p&&Date.now()-Date.parse(p.updatedAt)<45000,events:(db.telemetryEvents||[]).filter(e=>e.driver===me.username.toLowerCase()).slice(-30)})}
  if(u.pathname==='/api/fleet/positions'&&method==='GET'){
   if(!canDispatch(req))return send(res,403,{error:'Tylko administrator lub dyspozytor'});

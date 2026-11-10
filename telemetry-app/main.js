@@ -12,9 +12,11 @@ function restoreEvents(){try{const saved=JSON.parse(fs.readFileSync(eventQueuePa
 function validPacket(x){if(!x||typeof x!=='object'||Array.isArray(x))return false;const fields=['speedKmh','odometerKm','fuelLiters','cargoMassKg','worldX','worldY','worldZ'];return fields.some(k=>Number.isFinite(x[k]))&&fields.every(k=>x[k]===undefined||(typeof x[k]==='number'&&Number.isFinite(x[k])))&&['cargo','sourceCity','destinationCity','sourceCompany','destinationCompany','jobId','event'].every(k=>x[k]===undefined||(typeof x[k]==='string'&&x[k].length<=160));}
 function startReader(){
  if(process.platform!=='win32'||readerProcess)return;
- readerProcess=cp.spawn('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',resourcePath('rencloud-reader.ps1')],{windowsHide:true,stdio:'ignore'});
+ readerProcess=cp.spawn('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',resourcePath('rencloud-reader.ps1')],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+ readerProcess.stdout.on('data',chunk=>{readerError=chunk.toString().trim().split(/\r?\n/).at(-1)});
+ readerProcess.stderr.on('data',chunk=>{readerError=chunk.toString().trim().slice(0,500)});
  readerProcess.on('error',e=>{readerError=e.message;readerProcess=null});
- readerProcess.on('exit',code=>{readerError='Czytnik zakończył pracę: '+code;readerProcess=null});
+ readerProcess.on('exit',code=>{readerError=readerError||'Czytnik zakończył pracę: '+code;readerProcess=null});
 }
 function startBridge(){bridgeServer=http.createServer((req,res)=>{if(req.url!=='/v1/telemetry'||req.method!=='POST'){res.writeHead(404);return res.end()}if(req.socket.remoteAddress!=='127.0.0.1'&&req.socket.remoteAddress!=='::1'&&req.socket.remoteAddress!=='::ffff:127.0.0.1'){res.writeHead(403);return res.end()}let raw='';req.on('data',b=>{raw+=b;if(raw.length>8192)req.destroy()});req.on('end',()=>{try{const x=JSON.parse(raw);if(!validPacket(x))throw Error('bad data');lastTelemetry={...x,receivedAt:Date.now()};if(['job-started','job-delivered'].includes(x.event)){pendingEvents.push({...x,driver:captureDriver,type:x.event,eventKey:require('node:crypto').randomUUID()});if(pendingEvents.length>500)pendingEvents.shift();persistEvents()}res.writeHead(204);res.end()}catch{res.writeHead(400);res.end('Invalid telemetry')}})});bridgeServer.listen(38271,'127.0.0.1');bridgeServer.on('error',e=>{console.error('Telemetry bridge:',e.message)})}
 

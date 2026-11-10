@@ -1,4 +1,4 @@
-# Nowaczyk Transport - czytnik RenCloud v1.12.1 (Windows PowerShell 5.1)
+﻿# Nowaczyk Transport - czytnik RenCloud v1.12.1 (Windows PowerShell 5.1)
 # Tylko odczyt mapy Local\SCSTelemetry, wysylka do 127.0.0.1.
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Core
@@ -15,6 +15,7 @@ $lastError=''
 function Report($message) {
  if($message -ne $script:lastError) {
   $script:lastError=$message
+  [Console]::WriteLine($message)
   Add-Content -Path $logPath -Value ("$(Get-Date -Format o) $message") -Encoding UTF8
  }
 }
@@ -37,8 +38,8 @@ while($true) {
    $view=$mmf.CreateViewAccessor(0,0,[IO.MemoryMappedFiles.MemoryMappedFileAccess]::Read)
    try {
     if($view.Capacity -lt 4400) { throw "Za mala mapa pamieci: $($view.Capacity) bajtow" }
-    $b=New-Object byte[] ([Math]::Min(32768,[int]$view.Capacity))
-    [void]$view.ReadArray(0,$b,0,$b.Length)
+    $b=New-Object byte[] (4400)
+    for($i=0;$i -lt $b.Length;$i++) { $b[$i]=$view.ReadByte($i) }
    } finally { $view.Dispose() }
   } finally { $mmf.Dispose() }
   if($b[0] -ne 1) { Report "Mapa dostepna, ale nieaktywna: pierwszy bajt=$($b[0])"; Start-Sleep -Seconds 2; continue }
