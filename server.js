@@ -95,11 +95,22 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/fleet/positions'&&method==='GET'){
   if(!canDispatch(req))return send(res,403,{error:'Tylko administrator lub dyspozytor'});
   const now=Date.now();
-  const positions=Object.values(db.fleetPositions||{}).map(p=>{
+  const deliveries=new Map();
+  for(const event of db.telemetryEvents||[]){
+   if(event.type==='job-delivered'&&event.telemetry?.destinationCity)deliveries.set(event.driver.toLowerCase(),event);
+  }
+  const reports={...db.fleetPositions};
+  for(const account of accounts.values()){
+   const key=account.username.toLowerCase();
+   if(account.active&&['driver','probation'].includes(account.role)&&!Object.hasOwn(reports,key))reports[key]={driver:account.username,companyId:account.companyId};
+  }
+  const positions=Object.values(reports).map(p=>{
    const candidates=(db.routes||[]).filter(r=>r.driver?.toLowerCase()===p.driver.toLowerCase()&&r.companyId===p.companyId&&r.acceptedAt&&['Przyjęta','W trasie'].includes(r.status));
    const inProgress=candidates.filter(r=>r.status==='W trasie');
    const route=inProgress.length===1?inProgress[0]:candidates.length===1?candidates[0]:null;
-   return {...p,online:now-Date.parse(p.updatedAt)<45000,dispatchRoute:route?{from:route.from,to:route.to}:null};
+   const delivery=deliveries.get(p.driver.toLowerCase());
+   return {...p,online:now-Date.parse(p.updatedAt)<45000,dispatchRoute:route?{from:route.from,to:route.to}:null,lastDelivery:delivery?{city:delivery.telemetry.destinationCity,company:delivery.telemetry.destinationCompany}:null};
+
   });
   return send(res,200,{positions,source:'telemetry-client',gameMapReady:false});
  }
