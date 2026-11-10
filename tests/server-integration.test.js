@@ -1,12 +1,14 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{spawn}=require('node:child_process');
 test('login → dispatch → nested export → telemetry → driver panel and deduplication',async()=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nt-server-'));const port=20000+Math.floor(Math.random()*20000),base='http://127.0.0.1:'+port;const child=spawn(process.execPath,[path.resolve(__dirname,'../server.js')],{env:{...process.env,DATABASE_URL:'',DATA_FILE:path.join(dir,'data.json'),PORT:String(port),ADMIN_PASSWORD:'integration-password-only',COOKIE_SECURE:'0'},stdio:['ignore','pipe','pipe']});
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nt-server-'));fs.writeFileSync(path.join(dir,'data.json'),JSON.stringify({companies:[{id:'ks',name:'Nowaczyk Transport'}],initialBudgets:{ks:{initialCents:100,lockedAt:'2026-01-01'}}}));const port=20000+Math.floor(Math.random()*20000),base='http://127.0.0.1:'+port;const child=spawn(process.execPath,[path.resolve(__dirname,'../server.js')],{env:{...process.env,DATABASE_URL:'',DATA_FILE:path.join(dir,'data.json'),PORT:String(port),ADMIN_PASSWORD:'integration-password-only',COOKIE_SECURE:'0'},stdio:['ignore','pipe','pipe']});
  let logs='';child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
  async function req(url,data,cookie,headers={}){const r=await fetch(base+url,{method:data?'POST':'GET',headers:{'Content-Type':'application/json',Cookie:cookie||'',...headers},body:data?JSON.stringify(data):undefined});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]}}
  try{
  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(logs)),8000);child.stdout.on('data',()=>{if(logs.includes('Online:')){clearTimeout(timer);resolve()}});child.on('exit',code=>{clearTimeout(timer);reject(Error('Server '+code+' '+logs))})});
- const admin=await req('/api/accounts/login',{username:'admin',password:'integration-password-only'});assert.equal(admin.status,200);
+ const admin=await req('/api/accounts/login',{username:'admin',password:'integration-password-only'});assert.equal(admin.status,200);assert.equal(admin.data.user.companyId,'nowaczyk');
+ assert.equal((await req('/api/companies')).data[0].id,'nowaczyk');
+ assert.equal((await req('/api/budgets',null,admin.cookie)).data[0].initialCents,100);
  const created=await req('/api/accounts',{username:'driver1',password:'driver-password-only',role:'driver'},admin.cookie);assert.equal(created.status,201);
  const login=await req('/api/accounts/login',{username:'driver1',password:'driver-password-only'});assert.equal(login.status,200);
  const route={from:'Krakow',to:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'pallets',cargoTons:18,plannedKm:600,driver:'driver1'};

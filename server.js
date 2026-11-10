@@ -12,16 +12,61 @@ const ROLES=['admin','dispatcher','driver','probation','mechanic','boss','subcon
 const accounts=new Map();
 function passwordHash(pass,s=crypto.randomBytes(16).toString('hex')){return {salt:s,hash:crypto.scryptSync(pass,s,64).toString('hex')}}
 function safeAccount(a){return {id:a.id,username:a.username,role:a.role,companyId:a.companyId,active:a.active}}
-const initial={ledger:[],companies:[{id:'ks',name:'Nowaczyk Transport',bases:['Wadowice'],open:true,logo:''}],applications:[],routes:[],expenses:[],drivers:[]};
+const MAIN_COMPANY_ID='nowaczyk';
+const LEGACY_COMPANY_ID='ks';
+const initial={ledger:[],companies:[{id:MAIN_COMPANY_ID,name:'Nowaczyk Transport',bases:['Wadowice'],open:true,logo:''}],applications:[],routes:[],expenses:[],drivers:[]};
 const DATABASE_URL=process.env.DATABASE_URL;
 const {Pool}=DATABASE_URL?require('pg'):{Pool:null};
 const pool=DATABASE_URL?new Pool({connectionString:DATABASE_URL,ssl:{rejectUnauthorized:false},max:5,connectionTimeoutMillis:10000}):null;
+function migrateMainCompany(db){
+ let changed=false;
+ const legacy=db.companies.find(company=>company.id===LEGACY_COMPANY_ID);
+ if(legacy){
+  if(db.companies.some(company=>company.id===MAIN_COMPANY_ID))throw Error('Oba identyfikatory firmy istnieją. Migracja wymaga sprawdzenia danych.');
+  legacy.id=MAIN_COMPANY_ID;
+  changed=true;
+ }
+ function migrateReferences(value){
+  if(!value||typeof value!=='object')return;
+  for(const [key,entry] of Object.entries(value)){
+   if((key==='companyId'||key==='ownerCompanyId')&&entry===LEGACY_COMPANY_ID){
+    value[key]=MAIN_COMPANY_ID;
+    changed=true;
+   }else migrateReferences(entry);
+  }
+ }
+ migrateReferences(db);
+ if(db.initialBudgets&&Object.hasOwn(db.initialBudgets,LEGACY_COMPANY_ID)){
+  if(Object.hasOwn(db.initialBudgets,MAIN_COMPANY_ID))throw Error('Oba identyfikatory mają zatwierdzony budżet.');
+  db.initialBudgets[MAIN_COMPANY_ID]=db.initialBudgets[LEGACY_COMPANY_ID];
+  delete db.initialBudgets[LEGACY_COMPANY_ID];
+  changed=true;
+ }
+ return changed;
+}
 async function initStore(){
- if(!pool){const d=await load();for(const a of d.accounts||[])accounts.set(a.username.toLowerCase(),a);return;}
- await pool.query('CREATE TABLE IF NOT EXISTS ks_group_state (id INTEGER PRIMARY KEY, payload JSONB NOT NULL)');
- await pool.query('CREATE TABLE IF NOT EXISTS ks_company_budget (company_id TEXT PRIMARY KEY, initial_cents BIGINT NOT NULL CHECK (initial_cents >= 0), locked_at TIMESTAMPTZ NOT NULL DEFAULT now())');
- await pool.query('INSERT INTO ks_group_state(id,payload) VALUES (1,$1::jsonb) ON CONFLICT (id) DO NOTHING',[JSON.stringify(initial)]);
- const d=await load();for(const a of d.accounts||[])accounts.set(a.username.toLowerCase(),a);
+ let db;
+ if(!pool){
+  db=await load();
+  if(migrateMainCompany(db))await save(db);
+ }else{
+  await pool.query('CREATE TABLE IF NOT EXISTS ks_group_state (id INTEGER PRIMARY KEY, payload JSONB NOT NULL)');
+  await pool.query('CREATE TABLE IF NOT EXISTS ks_company_budget (company_id TEXT PRIMARY KEY, initial_cents BIGINT NOT NULL CHECK (initial_cents >= 0), locked_at TIMESTAMPTZ NOT NULL DEFAULT now())');
+  const connection=await pool.connect();
+  try{
+   await connection.query('BEGIN');
+   await connection.query('INSERT INTO ks_group_state(id,payload) VALUES (1,$1::jsonb) ON CONFLICT (id) DO NOTHING',[JSON.stringify(initial)]);
+   const result=await connection.query('SELECT payload FROM ks_group_state WHERE id=1 FOR UPDATE');
+   db={...structuredClone(initial),...result.rows[0].payload};
+   if(migrateMainCompany(db))await connection.query('UPDATE ks_group_state SET payload=$1::jsonb WHERE id=1',[JSON.stringify(db)]);
+   await connection.query('UPDATE ks_company_budget SET company_id=$1 WHERE company_id=$2',[MAIN_COMPANY_ID,LEGACY_COMPANY_ID]);
+   await connection.query('COMMIT');
+  }catch(error){
+   await connection.query('ROLLBACK');
+   throw error;
+  }finally{connection.release()}
+ }
+ for(const account of db.accounts||[])accounts.set(account.username.toLowerCase(),account);
 }
 async function load(){
  if(pool){const r=await pool.query('SELECT payload FROM ks_group_state WHERE id=1');return {...structuredClone(initial),...(r.rows[0]?.payload||{})}}
@@ -33,7 +78,7 @@ async function save(db){
 }
 function send(res,code,obj,headers={}){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(obj))}
 function who(req){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1],v=token&&sessions.get(token);if(!v)return null;if(typeof v==='number')return v>Date.now()?{role:'admin',username:'admin'}:null;const account=accounts.get(v.username.toLowerCase());return v.expires>Date.now()&&account?.active?{...safeAccount(account),expires:v.expires}:null}
-function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId==='ks')}
+function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
 function canDispatch(req){return ['admin','dispatcher','boss'].includes(who(req)?.role)}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
 function body(req){return new Promise((resolve,reject)=>{let s='';req.on('data',b=>{s+=b;if(s.length>150000)req.destroy()});req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch{reject(new Error('Niepoprawny JSON'))}});req.on('error',reject)})}
@@ -57,13 +102,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!rate(req,'fleet-position',120))return send(res,429,{error:'Zbyt wiele aktualizacji'});
   const a=await body(req),x=Number(a.x),z=Number(a.z),speed=Number(a.speedKmh||0);
   if(![x,z,speed].every(Number.isFinite)||Math.abs(x)>1e7||Math.abs(z)>1e7||speed<0||speed>200)return send(res,400,{error:'Nieprawidłowe współrzędne ETS2'});
-  const route=(db.routes||[]).find(r=>r.driver.toLowerCase()===me.username.toLowerCase()&&r.companyId===(me.companyId||'ks')&&r.status!=='Zakończona');
+  const route=(db.routes||[]).find(r=>r.driver.toLowerCase()===me.username.toLowerCase()&&r.companyId===(me.companyId||MAIN_COMPANY_ID)&&r.status!=='Zakończona');
   const key=me.username.toLowerCase(),previous=db.fleetPositions?.[key];
   const requested=str(a.activity,24);
   const activity=['Jazda','Pauza','Praca','Odpoczynek','Postój','Gra wstrzymana'].includes(requested)?requested:(speed>=3?'Jazda':'Postój');
   const country=str(a.country,80),city=str(a.city,100),place=str(a.place,120);
   const now=new Date().toISOString();
-  const position={driver:me.username,companyId:me.companyId||'ks',x,z,speedKmh:speed,cargo:str(a.cargo,120),cargoMassKg:Number.isFinite(a.cargoMassKg)&&a.cargoMassKg>=0?a.cargoMassKg:null,odometerKm:Number.isFinite(a.odometerKm)&&a.odometerKm>=0?a.odometerKm:null,onJob:a.onJob===true,cargoLoaded:a.cargoLoaded===true,activity,country,city,place,activitySince:previous?.activity===activity?previous.activitySince:now,routeId:route?.id||null,updatedAt:now,verified:false};
+  const position={driver:me.username,companyId:me.companyId||MAIN_COMPANY_ID,x,z,speedKmh:speed,cargo:str(a.cargo,120),cargoMassKg:Number.isFinite(a.cargoMassKg)&&a.cargoMassKg>=0?a.cargoMassKg:null,odometerKm:Number.isFinite(a.odometerKm)&&a.odometerKm>=0?a.odometerKm:null,onJob:a.onJob===true,cargoLoaded:a.cargoLoaded===true,activity,country,city,place,activitySince:previous?.activity===activity?previous.activitySince:now,routeId:route?.id||null,updatedAt:now,verified:false};
   db.fleetPositions??={};db.fleetPositions[key]=position;
   if(previous?.activity!==activity){
    db.fleetActivityEvents??=[];
@@ -90,7 +135,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/trailers'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator może zmieniać naczepy'});
-  const a=await body(req),id=str(a.id,80),plate=str(a.plate,30).toUpperCase(),model=str(a.model,100),type=str(a.type,60),assigneeId=str(a.assigneeId,80),ownerCompanyId=str(a.ownerCompanyId,80)||'ks';
+  const a=await body(req),id=str(a.id,80),plate=str(a.plate,30).toUpperCase(),model=str(a.model,100),type=str(a.type,60),assigneeId=str(a.assigneeId,80),ownerCompanyId=str(a.ownerCompanyId,80)||MAIN_COMPANY_ID;
   if(!plate||!model||!['firanka','chlodnia','platforma','kontener','inna'].includes(type))return send(res,400,{error:'Podaj rejestrację, model i rodzaj naczepy'});
   if(!db.companies.some(c=>c.id===ownerCompanyId))return send(res,400,{error:'Nieznana firma właściciela'});
   const assignee=assigneeId?[...accounts.values()].find(x=>x.id===assigneeId&&x.active&&['driver','probation','subcontractor'].includes(x.role)):null;
@@ -110,7 +155,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(pool){const q=await pool.query('SELECT company_id,initial_cents,locked_at FROM ks_company_budget');entries=q.rows.map(x=>({companyId:x.company_id,initialCents:Number(x.initial_cents),lockedAt:x.locked_at}))}
   else entries=Object.entries(db.initialBudgets||{}).map(([companyId,x])=>({companyId,...x}));
   const budgets=(db.companies||[]).map(c=>{
-   const b=entries.find(x=>x.companyId===c.id),income=(db.ledger||[]).filter(x=>x.companyId===c.id).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0),costs=(db.expenses||[]).filter(x=>{const r=(db.routes||[]).find(r=>r.id===x.routeId);return (x.companyId||r?.companyId||'ks')===c.id}).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
+   const b=entries.find(x=>x.companyId===c.id),income=(db.ledger||[]).filter(x=>x.companyId===c.id).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0),costs=(db.expenses||[]).filter(x=>{const r=(db.routes||[]).find(r=>r.id===x.routeId);return (x.companyId||r?.companyId||MAIN_COMPANY_ID)===c.id}).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
    return {companyId:c.id,name:c.name,locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b?b.initialCents+income-costs:null};
   });return send(res,200,budgets);
  }
@@ -154,7 +199,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const amount=Math.round((base+bonus-deduction)*100)/100;if(amount<0)return send(res,400,{error:'Potrącenia przekraczają wynagrodzenie'});
   db.wallets??={};db.wallets[driver]=Math.round(((db.wallets[driver]||0)+amount)*100)/100;
   db.payments.push({id:crypto.randomUUID(),driver,month,base,bonus,deduction,amount,createdAt:new Date().toISOString()});
-  db.ledger??=[];db.ledger.push({id:crypto.randomUUID(),companyId:'ks',type:'wyplata',amount:-amount,createdAt:new Date().toISOString()});
+  db.ledger??=[];db.ledger.push({id:crypto.randomUUID(),companyId:MAIN_COMPANY_ID,type:'wyplata',amount:-amount,createdAt:new Date().toISOString()});
   await save(db);return send(res,201,{ok:true,amount});
  }
  if(u.pathname==='/api/economy/item'&&method==='POST'){
@@ -211,11 +256,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const existing=db.telemetryEvents.find(e=>e.driver===driver&&e.eventKey===eventKey);
   if(existing)return send(res,200,{ok:true,duplicate:true,event:existing});
   const telemetry={cargoMassKg:Number.isFinite(a.cargoMassKg)&&a.cargoMassKg>0?a.cargoMassKg:null,odometerKm:Number.isFinite(a.odometerKm)?a.odometerKm:null,cargo:str(a.cargo,120),sourceCity:str(a.sourceCity,120),destinationCity:str(a.destinationCity,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120)};
-  const candidates=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===(me.companyId||'ks')&&r.status!=='Zakończona');
+  const candidates=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===(me.companyId||MAIN_COMPANY_ID)&&r.status!=='Zakończona');
   const norm=x=>String(x||'').trim().toLocaleLowerCase('pl');
   const matches=candidates.filter(r=>r.acceptedAt&&validateJob(r,telemetry).match);
   const route=matches.length===1?matches[0]:null;
-  const event={id:crypto.randomUUID(),eventKey,driver,companyId:me.companyId||'ks',type,telemetry,routeId:route?.id||null,matchStatus:route?'matched':'unmatched',checks:candidates.map(r=>({routeId:r.id,...validateJob(r,telemetry)})),verified:false,settlementAllowed:false,receivedAt:new Date().toISOString()};
+  const event={id:crypto.randomUUID(),eventKey,driver,companyId:me.companyId||MAIN_COMPANY_ID,type,telemetry,routeId:route?.id||null,matchStatus:route?'matched':'unmatched',checks:candidates.map(r=>({routeId:r.id,...validateJob(r,telemetry)})),verified:false,settlementAllowed:false,receivedAt:new Date().toISOString()};
   db.telemetryEvents.push(event);if(db.telemetryEvents.length>5000)db.telemetryEvents.splice(0,db.telemetryEvents.length-5000);
   await save(db);return send(res,201,{ok:true,event});
  }
@@ -243,7 +288,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(req.headers.origin||!expected||typeof provided!=='string'||provided.length!==expected.length||!crypto.timingSafeEqual(Buffer.from(provided),Buffer.from(expected)))return send(res,403,{error:'Trasę przyjmiesz wyłącznie po zalogowaniu w aplikacji Nowaczyk Transport.'});
   const a=await body(req),r=(db.routes||[]).find(x=>x.id===a.routeId);
   if(!r)return send(res,404,{error:'Nie znaleziono trasy'});
-  if(r.driver.toLowerCase()!==me.username.toLowerCase()||r.companyId!==(me.companyId||'ks'))return send(res,403,{error:'To nie jest Twoja trasa'});
+  if(r.driver.toLowerCase()!==me.username.toLowerCase()||r.companyId!==(me.companyId||MAIN_COMPANY_ID))return send(res,403,{error:'To nie jest Twoja trasa'});
   if(r.acceptedAt)return send(res,200,{ok:true,duplicate:true,route:r});
   if(!['Przydzielona','W trasie'].includes(r.status))return send(res,409,{error:'Trasa nie oczekuje na przyjęcie'});
   r.acceptedAt=new Date().toISOString();r.acceptedBy=me.username;r.acceptedVia='desktop';r.status='Przyjęta';await save(db);return send(res,200,{ok:true,route:r});
@@ -272,7 +317,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(trailerId&&!trailer)return send(res,400,{error:'Nie znaleziono przypisanej naczepy'});
   if(trailer&&trailer.assigneeUsername&&trailer.assigneeUsername.toLowerCase()!==driver.toLowerCase())return send(res,409,{error:'Naczepa jest przypisana do innego kierowcy lub podwykonawcy'});
   const sourceCompany=str(a.sourceCompany,120),destinationCompany=str(a.destinationCompany,120);
-  const r={id:crypto.randomUUID(),trailerId:trailerId||null,freight,companyId:str(a.companyId,80)||'ks',driver,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
+  const r={id:crypto.randomUUID(),trailerId:trailerId||null,freight,companyId:str(a.companyId,80)||MAIN_COMPANY_ID,driver,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
   db.routes??=[];db.routes.push(r);await save(db);return send(res,201,r);
  }
  if(u.pathname==='/api/routes/progress'&&method==='POST'){
@@ -337,7 +382,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   let v=id?db.fleet.find(x=>x.id===id):null;
   if(id&&!v)return send(res,404,{error:'Nie znaleziono pojazdu'});
   if(!v){v={id:crypto.randomUUID()};db.fleet.push(v)}
-  Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:acct?.companyId||'ks'});
+  Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:acct?.companyId||MAIN_COMPANY_ID});
   await save(db);return send(res,200,v);
  }
  if(['/api/accounts/login','/api/desktop/login'].includes(u.pathname)&&method==='POST'){
@@ -361,7 +406,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/accounts'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
-  const a=await body(req),username=str(a.username,50),pass=str(a.password,300),role=str(a.role,40),companyId=str(a.companyId,80)||'ks';
+  const a=await body(req),username=str(a.username,50),pass=str(a.password,300),role=str(a.role,40),companyId=str(a.companyId,80)||MAIN_COMPANY_ID;
   if(!/^[a-zA-Z0-9._-]{3,50}$/.test(username)||pass.length<12||!ROLES.includes(role))return send(res,400,{error:'Login: 3–50 znaków, hasło min. 12 znaków, poprawna rola'});
   if(role==='admin'&&who(req).role!=='admin')return send(res,403,{error:'Tylko administrator może utworzyć konto administratora'});
   if(accounts.has(username.toLowerCase()))return send(res,409,{error:'Login zajęty'});
@@ -424,4 +469,4 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(!fs.existsSync(full)||!fs.statSync(full).isFile())return send(res,404,{error:'Nie znaleziono'});
  res.writeHead(200,{'Content-Type':mime[path.extname(full)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Content-Security-Policy':"default-src 'self' 'unsafe-inline' data:; connect-src 'self'"});fs.createReadStream(full).pipe(res);
 }catch(e){console.error(e);if(!res.headersSent)send(res,500,{error:'Błąd serwera'})}finally{release?.()}});
-initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:'ks',active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,()=>console.log('Nowaczyk Transport Online: http://localhost:'+PORT))).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
+initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,()=>console.log('Nowaczyk Transport Online: http://localhost:'+PORT))).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
