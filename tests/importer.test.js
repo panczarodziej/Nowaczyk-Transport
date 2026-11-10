@@ -42,3 +42,9 @@ test('unwraps ScsC text and preserves the encrypted original in the backup',()=>
   assert.match(fs.readFileSync(file,'utf8'),/target: "tradeaux.berlin"/);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
+
+test('uses a matching trailer type and refuses incompatible offers',()=>{
+ const refrigerated=text.replace('trailer_def.scs.box','trailer_def.scs.box.single_3.reefer');
+ assert.match(plan(refrigerated,{...job,trailerType:'chlodnia'}).text,/tradeaux.berlin/);
+ assert.throws(()=>plan(refrigerated,{...job,trailerType:'firanka'}),/plandeka/);
+});

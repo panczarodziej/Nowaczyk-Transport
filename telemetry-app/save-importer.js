@@ -39,7 +39,18 @@ function plan(text,job){
  // Preserve trailer, unit count and compatibility at source. Never borrow an arbitrary trailer.
  const eligible=offers.filter(u=>refs.includes(u.id)&&norm(field(u,'cargo')?.replace(/^cargo\./,''))===norm(cargo.id||cargo.name));
  if(!eligible.length)throw Error('W firmie załadunku brak szablonu tego towaru. Import wstrzymany: nie można dobrać zgodnej naczepy i masy przez zgadywanie.');
- const slot=eligible[0];if(!field(slot,'trailer_definition')||!field(slot,'units_count'))throw Error('Brak definicji naczepy lub liczby jednostek towaru.');
+ const trailerType=job.trailerType;
+ const allowedTypes={firanka:['curtainside',/(?:^|\.)curtain(?:_|$)/i],chlodnia:['refrigerated',/(?:^|\.)reefer(?:_|$)/i]};
+ const expected=Object.hasOwn(allowedTypes,trailerType)?allowedTypes[trailerType]:null;
+ const slot=expected?eligible.find(offer=>{
+  const ref=field(offer,'trailer_definition');
+  if(!ref)return false;
+  const definition=list.find(unit=>unit.type==='trailer_def'&&unit.id===ref);
+  const body=definition&&field(definition,'body_type');
+  return body?body===expected[0]:expected[1].test((definition&&field(definition,'source_name'))||ref);
+ }):eligible[0];
+ if(!slot)throw Error('W zapisie brak oferty z tym towarem i wybranym typem naczepy: '+(trailerType==='firanka'?'plandeka':'chłodnia')+'.');
+ if(!field(slot,'trailer_definition')||!field(slot,'units_count'))throw Error('Brak definicji naczepy lub liczby jednostek towaru.');
  const km=Number(job.plannedKm);if(!Number.isSafeInteger(km)||km<=0||km>30000)throw Error('Zlecenie musi mieć całkowity dystans 1–30000 km');
  const economy=list.find(u=>u.type==='economy');const clock=Number(economy&&field(economy,'game_time'));if(!Number.isSafeInteger(clock)||clock<0)throw Error('Brak czasu gry w zapisie');
  const target=to.id.slice(17);let replacement=replaceField(slot.text,'target',JSON.stringify(target));replacement=replaceField(replacement,'expiration_time',clock+7*24*60);replacement=replaceField(replacement,'shortest_distance_km',km);

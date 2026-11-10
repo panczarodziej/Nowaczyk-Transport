@@ -330,7 +330,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const key=normalize(name||'').replace(/[^a-z0-9]/g,'');
    return Object.hasOwn(companyAliases,key)?companyAliases[key]:name||'';
   }
-  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:cityId(r.from),company:companyId(r.sourceCompany)},to:{country:r.toCountry||'',city:cityId(r.to),company:companyId(r.destinationCompany)},cargo:{name:r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
+  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:cityId(r.from),company:companyId(r.sourceCompany)},to:{country:r.toCountry||'',city:cityId(r.to),company:companyId(r.destinationCompany)},cargo:{name:r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,trailerType:['firanka','chlodnia'].includes(r.trailerType)?r.trailerType:null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="ks-job-'+r.id+'.json"','Cache-Control':'no-store'});return res.end(JSON.stringify(job,null,2));
  }
  if(u.pathname==='/api/routes/assignees'&&method==='GET'){
@@ -364,11 +364,14 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!Number.isFinite(plannedKm)||plannedKm<0||plannedKm>20000)return send(res,400,{error:'Nieprawidłowy dystans'});
   const freight=Number(a.freight||0);if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
   if(!Number.isFinite(Number(a.cargoTons||0))||Number(a.cargoTons||0)<0||Number(a.cargoTons||0)>100)return send(res,400,{error:'Nieprawidłowa masa ładunku'});
+  const trailerType=str(a.trailerType,20);
+  if(trailerType&&!['firanka','chlodnia'].includes(trailerType))return send(res,400,{error:'Wybierz plandekę lub chłodnię.'});
   const trailerId=str(a.trailerId,80),trailer=trailerId?(db.trailers||[]).find(t=>t.id===trailerId):null;
+  if(trailer&&trailerType&&trailer.type!==trailerType)return send(res,400,{error:'Typ wybranej naczepy nie odpowiada zleceniu.'});
   if(trailerId&&!trailer)return send(res,400,{error:'Nie znaleziono przypisanej naczepy'});
   if(trailer&&trailer.assigneeUsername&&trailer.assigneeUsername.toLowerCase()!==driver.toLowerCase())return send(res,409,{error:'Naczepa jest przypisana do innego kierowcy lub podwykonawcy'});
   const sourceCompany=str(a.sourceCompany,120),destinationCompany=str(a.destinationCompany,120);
-  const r={id:crypto.randomUUID(),trailerId:trailerId||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
+  const r={id:crypto.randomUUID(),trailerId:trailerId||null,trailerType:trailerType||trailer?.type||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
   db.routes??=[];db.routes.push(r);await save(db);return send(res,201,r);
  }
  if(u.pathname==='/api/routes/progress'&&method==='POST'){
