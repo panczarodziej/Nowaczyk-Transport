@@ -44,15 +44,9 @@ function readLoadingPoint(file,side){
  if(!validPlacement(placement))throw Error('Zapis wzorcowy nie zawiera punktu załadunku.');
  return placement;
 }
-function findLoadingPoint(saveFile,side){
- const root=path.dirname(path.dirname(saveFile));
- for(const entry of fs.readdirSync(root,{withFileTypes:true})){
-  if(!entry.isDirectory())continue;
-  const reference=path.join(root,entry.name,'game.sii');
-  if(reference===saveFile)continue;
-  try{return readLoadingPoint(reference,side)}catch{}
- }
- throw Error('Brak punktu załadunku dla '+side.company+' w '+side.city+'. Zapisz lokalnie aktywne zlecenie z Rynku ładunków z tej firmy.');
+function loadingPoint(side){
+ if(!validPlacement(side?.loadingPlacement))throw Error('Brak punktu firmy w katalogu mapy. Odśwież trasę w aplikacji lub wybierz firmę z mapy Nowaczyk.');
+ return side.loadingPlacement;
 }
 function plan(text,job,ramps){
  const list=units(text),source=job.from||{},dest=job.to||{},cargo=job.cargo||{};
@@ -124,4 +118,4 @@ function importFile(file,job,ramps){
  try{fs.writeFileSync(tmp,result.text,{encoding:'utf8',flag:'wx'});if(!fs.readFileSync(file).equals(bytes))throw Error('Zapis zmienił się podczas importu. Nie został nadpisany.');fs.renameSync(tmp,file)}finally{if(fs.existsSync(tmp))fs.unlinkSync(tmp)}
  const {text,...details}=result;return {...details,backup};
 }
-module.exports={plan,importFile,decodeSave,readLoadingPoint,findLoadingPoint};
+module.exports={plan,importFile,decodeSave,readLoadingPoint,loadingPoint};

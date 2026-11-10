@@ -63,6 +63,7 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  const mapSetExport=await req('/api/routes/export?id='+mapSetAssigned.data.id,null,desktop.cookie);
  assert.equal(mapSetExport.data.from.city,'wadowice');
  assert.equal(mapSetExport.data.from.company,'maspex');
+ assert.match(mapSetExport.data.from.loadingPlacement,/^\(/);
  assert.equal(mapSetExport.data.to.city,'krakow');
  assert.ok(mapSetExport.data.to.deliveryPlacements.hard.length);
  assert.equal((await req('/api/routes/archive',{id:mapSetAssigned.data.id},admin.cookie)).status,200);
