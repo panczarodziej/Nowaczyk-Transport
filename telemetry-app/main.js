@@ -145,21 +145,25 @@ async function autoDispatch(){
   }
   const result=await listDriverRoutes();
   if(!result.ok)throw Error(result.error);
-  const route=result.routes.filter(r=>r.driver?.toLowerCase()===auth.username.toLowerCase()&&['Przydzielona','Przyjęta'].includes(r.status)&&!Object.hasOwn(config.prepared,r.id))
+  const waitingRoutes=result.routes.filter(r=>r.driver?.toLowerCase()===auth.username.toLowerCase()&&['Przydzielona','Przyjęta','W trasie'].includes(r.status));
+  if(waitingRoutes.some(r=>Object.hasOwn(config.prepared,r.id))){
+   autoDispatchMessage='Oferta jest gotowa. Wczytaj ręczny zapis ETS2 i dokończ trasę przed przygotowaniem następnej.';
+   return;
+  }
+  const route=waitingRoutes.filter(r=>r.status!=='W trasie')
    .sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||'')))[0];
   if(!route)return;
   const exported=await driverRequest('/api/routes/export?id='+encodeURIComponent(route.id));
   if(!exported.ok)throw Error(exported.error||'Nie udało się pobrać danych trasy.');
-  const ramps=await readTruckyRamps();
   if(desktopAuth!==auth||autoDispatchSettings().savePath!==config.savePath)return;
   const importer=require('./save-importer');
-  importer.plan(importer.decodeSave(fs.readFileSync(config.savePath)),exported,ramps);
+  importer.plan(importer.decodeSave(fs.readFileSync(config.savePath)),exported);
   if(!route.acceptedAt){
    const accepted=await driverRequest('/api/routes/accept',{method:'POST',body:JSON.stringify({routeId:route.id})});
    if(!accepted.ok)throw Error(accepted.error||'Nie udało się przyjąć trasy.');
   }
   if(desktopAuth!==auth||autoDispatchSettings().savePath!==config.savePath||Date.now()-lastTelemetry.receivedAt>10000||lastTelemetry.onJob!==false)return;
-  const prepared=importer.importFile(config.savePath,exported,ramps);
+  const prepared=importer.importFile(config.savePath,exported);
   config.prepared[route.id]=true;
   writeAutoDispatch(config);
   autoDispatchMessage=prepared.notice;
