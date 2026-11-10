@@ -22,6 +22,21 @@ if(x.role!=='admin'){
  };
  roleCell.append(select);
 }
-cell(x.companyId);cell(x.active?'Aktywne':'Zablokowane');const td=document.createElement('td');if(x.role!=='admin'){const b=document.createElement('button');b.textContent=x.active?'Zablokuj':'Odblokuj';b.onclick=async()=>{try{await api('/api/accounts/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:x.username,active:!x.active})});refresh()}catch(e){msg.textContent=e.message}};td.append(b)}tr.append(td);tb.append(tr)}}catch(e){msg.textContent=e.message}}
+cell(x.companyId);cell(x.active?'Aktywne':'Zablokowane');const td=document.createElement('td');if(x.role!=='admin'){const b=document.createElement('button');b.textContent=x.active?'Zablokuj':'Odblokuj';b.onclick=async()=>{try{await api('/api/accounts/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:x.username,active:!x.active})});refresh()}catch(e){msg.textContent=e.message}};td.append(b)}
+if(['driver','probation'].includes(x.role)){
+ const remove=document.createElement('button');
+ remove.textContent='Usuń konto';
+ remove.onclick=async()=>{
+  if(!confirm('Usunąć konto '+x.username+'? Historia kursów zostanie w systemie.'))return;
+  remove.disabled=true;
+  try{
+   await api('/api/accounts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:x.username})});
+   msg.textContent='Usunięto konto '+x.username;
+   await refresh();
+  }catch(e){msg.textContent=e.message;remove.disabled=false}
+ };
+ td.append(' ',remove);
+}
+tr.append(td);tb.append(tr)}}catch(e){msg.textContent=e.message}}
 document.getElementById('create').onsubmit=async e=>{e.preventDefault();try{await api('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value,role:role.value,companyId:companyId.value})});msg.textContent='Konto utworzone';e.target.reset();refresh()}catch(err){msg.textContent=err.message}};api('/api/accounts/me').then(({user})=>{if(user?.role==='boss')document.querySelector('#role option[value=admin]').remove();refresh()}).catch(e=>{msg.textContent=e.message});
 </script></html>

@@ -48,3 +48,24 @@ test('uses a matching trailer type and refuses incompatible offers',()=>{
  assert.match(plan(refrigerated,{...job,trailerType:'chlodnia'}).text,/tradeaux.berlin/);
  assert.throws(()=>plan(refrigerated,{...job,trailerType:'firanka'}),/plandeka/);
 });
+test('reads the loading point only from a matching active cargo-market job',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nt-loading-'));
+ try{
+  const file=path.join(dir,'game.sii');
+  const point='(10, 20, 30) (1; 0, 0, 0)';
+  fs.writeFileSync(file,`SiiNunit
+{
+player : _player {
+ current_job: _active
+}
+player_job : _active {
+ source_company: company.volatile.transinet.krakow
+ source_placement: ${point}
+ is_cargo_market_job: true
+}
+}`);
+  const {readLoadingPoint}=require('../telemetry-app/save-importer');
+  assert.equal(readLoadingPoint(file,{city:'krakow',company:'transinet'}),point);
+  assert.throws(()=>readLoadingPoint(file,{city:'berlin',company:'transinet'}),/tej samej firmy/);
+ }finally{fs.rmSync(dir,{recursive:true,force:true})}
+});

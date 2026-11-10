@@ -27,6 +27,33 @@ function units(text){
 }
 function field(unit,key){const m=unit.text.match(new RegExp('^\\s*'+key+':\\s*([^\\r\\n]+)','m'));return m?m[1].trim().replace(/^"|"$/g,''):null}
 function replaceField(text,key,value){const re=new RegExp('^(\\s*'+key+':\\s*)[^\\r\\n]+','m');if(!re.test(text))throw Error('Brak pola '+key+' — zapis nieobsługiwany');return text.replace(re,(_,prefix)=>prefix+value)}
+function validPlacement(value){
+ return typeof value==='string'&&/^\([0-9&., +eEabcdefA-F-]+\)\s*\([0-9&.,; +eEabcdefA-F-]+\)$/.test(value)&&!value.includes('&60ad78ec');
+}
+function readLoadingPoint(file,side){
+ if(fs.statSync(file).size>maxSaveBytes)throw Error('Zapis wzorcowy jest zbyt duży.');
+ const list=units(decodeSave(fs.readFileSync(file)));
+ const player=list.find(unit=>unit.type==='player');
+ const active=player&&field(player,'current_job');
+ const job=list.find(unit=>unit.type==='player_job'&&unit.id===active);
+ const company=job&&field(job,'source_company');
+ if(!company||company!=='company.volatile.'+side.company+'.'+side.city||field(job,'is_cargo_market_job')!=='true'){
+  throw Error('Zapis wzorcowy musi zawierać aktywne zlecenie rynku ładunków z tej samej firmy załadunku.');
+ }
+ const placement=field(job,'source_placement');
+ if(!validPlacement(placement))throw Error('Zapis wzorcowy nie zawiera punktu załadunku.');
+ return placement;
+}
+function findLoadingPoint(saveFile,side){
+ const root=path.dirname(path.dirname(saveFile));
+ for(const entry of fs.readdirSync(root,{withFileTypes:true})){
+  if(!entry.isDirectory())continue;
+  const reference=path.join(root,entry.name,'game.sii');
+  if(reference===saveFile)continue;
+  try{return readLoadingPoint(reference,side)}catch{}
+ }
+ throw Error('Brak punktu załadunku dla '+side.company+' w '+side.city+'. Zapisz lokalnie aktywne zlecenie z Rynku ładunków z tej firmy.');
+}
 function plan(text,job,ramps){
  const list=units(text),source=job.from||{},dest=job.to||{},cargo=job.cargo||{};
  if(!source.company||!source.city||!dest.company||!dest.city||!cargo.name)throw Error('Dyspozytor musi podać obie firmy, oba miasta i towar.');
@@ -70,17 +97,11 @@ function plan(text,job,ramps){
  const km=Number(job.plannedKm);if(!Number.isSafeInteger(km)||km<=0||km>30000)throw Error('Zlecenie musi mieć całkowity dystans 1–30000 km');
  const economy=list.find(u=>u.type==='economy');const clock=Number(economy&&field(economy,'game_time'));if(!Number.isSafeInteger(clock)||clock<0)throw Error('Brak czasu gry w zapisie');
  if(ramps){
-  function placement(company){
-   const [name,city]=company.id.slice(17).split('.');
-   const matches=ramps.filter(r=>r?.company_name===name&&r.city_name===city);
-   const points=matches.length===1?matches[0].placements:null;
-   const easy=points?.easy?.[0];
-   const valid=value=>typeof value==='string'&&/^\([0-9&., +eEabcdefA-F-]+\)\s*\([0-9&.,; +eEabcdefA-F-]+\)$/.test(value);
-   if(!valid(easy)||easy.includes('&60ad78ec'))throw Error('Brak jednoznacznej rampy: '+company.id.slice(17));
-   return [easy,...['medium','hard'].map(type=>valid(points[type]?.[0])&&!points[type][0].includes('&60ad78ec')?points[type][0]:easy)];
-  }
-  const [sourcePlacement]=placement(from);
-  const [target,medium,hard]=placement(to);
+  const sourcePlacement=ramps.source;
+  const points=dest.deliveryPlacements;
+  const target=points?.easy?.[0];
+  if(!validPlacement(sourcePlacement)||!validPlacement(target))throw Error('Brak punktu załadunku lub rozładunku. Wybierz trasę z katalogu Nowaczyk.');
+  const [medium,hard]=['medium','hard'].map(type=>validPlacement(points[type]?.[0])?points[type][0]:target);
   const numbers={units_count:Number(field(slot,'units_count')),ferry_time:Number(field(slot,'ferry_time')||0),ferry_price:Number(field(slot,'ferry_price')||0),urgency:Number(field(slot,'urgency')||0)};
   if(Object.values(numbers).some(n=>!Number.isSafeInteger(n)||n<0)||!numbers.units_count)throw Error('Nieprawidłowe dane wzorcowej oferty ETS2.');
   const id='_nameless.aaa.'+crypto.randomBytes(2).toString('hex')+'.'+crypto.randomBytes(2).toString('hex');
@@ -103,4 +124,4 @@ function importFile(file,job,ramps){
  try{fs.writeFileSync(tmp,result.text,{encoding:'utf8',flag:'wx'});if(!fs.readFileSync(file).equals(bytes))throw Error('Zapis zmienił się podczas importu. Nie został nadpisany.');fs.renameSync(tmp,file)}finally{if(fs.existsSync(tmp))fs.unlinkSync(tmp)}
  const {text,...details}=result;return {...details,backup};
 }
-module.exports={plan,importFile,decodeSave};
+module.exports={plan,importFile,decodeSave,readLoadingPoint,findLoadingPoint};
