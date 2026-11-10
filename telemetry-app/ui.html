@@ -8,13 +8,13 @@ const imp=document.createElement('button');
 imp.textContent='Dodaj ofertę do zapisu ETS2';
 imp.style.margin='8px';
 const own=document.createElement('button');
-own.textContent='Własna naczepa (test, wymaga Trucky)';
+own.textContent='Własna naczepa bez Trucky';
 own.onclick=async()=>{
  own.disabled=true;
  try{await prepareOffer(true)}catch(e){routeMessage.textContent=e.message}finally{own.disabled=false}
 };
 async function prepareOffer(ownTrailer=false){
- routeMessage.textContent='Wybierz plik game.sii z zapisu ETS2.';
+ routeMessage.textContent=ownTrailer?'Wybierz zapis docelowy z podpiętą naczepą, potem osobny zapis z aktywnym zleceniem rynku ładunków z tej samej firmy.':'Wybierz plik game.sii z zapisu ETS2.';
  const result=await window.ks.importDriverRoute(r.id,ownTrailer);
  routeMessage.textContent=result.ok?result.notice:'Trasa przyjęta. '+(result.error||'Spróbuj ponownie przygotować ofertę.');
 }
