@@ -56,6 +56,16 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/accounts',{username:'other-driver',password:'other-driver-password',role:'driver'},admin.cookie)).status,201);
  const otherRoute=await req('/api/routes',{...route,driver:'other-driver'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:otherRoute.data.id},desktop.cookie,desktopHeaders)).status,403);
  const second=await req('/api/routes',{...route,to:'Poznan'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:second.data.id},desktop.cookie,desktopHeaders)).status,200);
+ const mapSetRoute={...route,catalogProfile:'snapshot',from:'Wadowice',sourceCompany:'maspex',to:'Kraków',destinationCompany:'tradeaux'};
+ assert.equal((await req('/api/routes',{...mapSetRoute,sourceCompany:'tradeaux'},admin.cookie)).status,400);
+ const mapSetAssigned=await req('/api/routes',mapSetRoute,admin.cookie);
+ assert.equal(mapSetAssigned.status,201);
+ const mapSetExport=await req('/api/routes/export?id='+mapSetAssigned.data.id,null,desktop.cookie);
+ assert.equal(mapSetExport.data.from.city,'wadowice');
+ assert.equal(mapSetExport.data.from.company,'maspex');
+ assert.equal(mapSetExport.data.to.city,'krakow');
+ assert.ok(mapSetExport.data.to.deliveryPlacements.hard.length);
+ assert.equal((await req('/api/routes/archive',{id:mapSetAssigned.data.id},admin.cookie)).status,200);
  const meDesktop=await req('/api/accounts/me',null,desktop.cookie);assert.equal(meDesktop.data.user.desktopToken,undefined);
  for(const path of ['/','/index.html','/system-login.html']){
   const back=await fetch(base+path,{headers:{Cookie:dispatcher.cookie},redirect:'manual'});

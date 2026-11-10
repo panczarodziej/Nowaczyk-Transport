@@ -10,6 +10,26 @@ const sessions=new Map();
 const desktopSessions=new Map();
 const ROLES=['admin','dispatcher','driver','probation','mechanic','boss','subcontractor'];
 const accounts=new Map();
+const {europe,poland,middleEast}=require('./public/ets2-catalog.json');
+const normalize=value=>String(value).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').replace(/ł/g,'l').trim();
+const polishNames=require('./public/ets2-polish-names.json');
+function alias(entries,value){
+ return Object.entries(entries).find(([label])=>normalize(label)===normalize(value))?.[1];
+}
+function cityId(name,cities){
+ const key=normalize(name);
+ if(Object.hasOwn(cities,key))return key;
+ const translated=alias(polishNames.cities,name);
+ if(translated&&Object.hasOwn(cities,translated))return translated;
+ const matches=Object.entries(cities).filter(([,city])=>normalize(city[0])===key);
+ return matches.length===1?matches[0][0]:name;
+}
+const nowaczykMap=Object.assign({},...Array.from({length:24},(_,i)=>require('./public/ets2-mapset-nowaczyk-'+i+'.json')));
+const nowaczykCities=Object.fromEntries(Object.keys(nowaczykMap).map(id=>[id,poland[id]||middleEast[id]||europe[id]||[id]]));
+function mapSetCompany(city,company){
+ return Object.hasOwn(nowaczykMap,city)&&Object.hasOwn(nowaczykMap[city],company);
+}
+
 function passwordHash(pass,s=crypto.randomBytes(16).toString('hex')){return {salt:s,hash:crypto.scryptSync(pass,s,64).toString('hex')}}
 function safeAccount(a){return {id:a.id,username:a.username,role:a.role,companyId:a.companyId,active:a.active}}
 const MAIN_COMPANY_ID='nowaczyk';
@@ -327,27 +347,14 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!r)return send(res,404,{error:'Nie znaleziono zlecenia'});
   if(!canDispatch(req)&&(r.driver.toLowerCase()!==me.username.toLowerCase()||r.companyId!==me.companyId))return send(res,403,{error:'Brak dostępu'});
   const mapProfile=(db.driverMapProfiles||{})[r.driver.toLowerCase()]||'promods-pr';
-  const {europe,poland,middleEast}=require('./public/ets2-catalog.json');
   const cities={...europe,...middleEast,...(mapProfile==='promods-pr'?poland:{})};
-  const normalize=value=>String(value).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').replace(/ł/g,'l').trim();
-  const polishNames=require('./public/ets2-polish-names.json');
-  function alias(entries,value){
-   return Object.entries(entries).find(([label])=>normalize(label)===normalize(value))?.[1];
-  }
-  function cityId(name){
-   const key=normalize(name);
-   if(Object.hasOwn(cities,key))return key;
-   const translated=alias(polishNames.cities,name);
-   if(translated&&Object.hasOwn(cities,translated))return translated;
-   const matches=Object.entries(cities).filter(([,city])=>normalize(city[0])===key);
-   return matches.length===1?matches[0][0]:name;
-  }
   const companyAliases=require('./ets2-company-aliases.json');
   function companyId(name){
    const key=normalize(name||'').replace(/[^a-z0-9]/g,'');
    return Object.hasOwn(companyAliases,key)?companyAliases[key]:name||'';
   }
-  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:cityId(r.from),company:companyId(r.sourceCompany)},to:{country:r.toCountry||'',city:cityId(r.to),company:companyId(r.destinationCompany)},cargo:{name:r.cargo||'',id:alias(polishNames.cargo,r.cargo)||r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,trailerType:['firanka','chlodnia'].includes(r.trailerType)?r.trailerType:null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
+  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:r.mapSetFrom||cityId(r.from,cities),company:r.mapSetFrom?r.sourceCompany:companyId(r.sourceCompany)},to:{country:r.toCountry||'',city:r.mapSetTo||cityId(r.to,cities),company:r.mapSetTo?r.destinationCompany:companyId(r.destinationCompany)},cargo:{name:r.cargo||'',id:alias(polishNames.cargo,r.cargo)||r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,trailerType:['firanka','chlodnia'].includes(r.trailerType)?r.trailerType:null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
+  if(mapSetCompany(r.mapSetTo,r.destinationCompany))job.to.deliveryPlacements=nowaczykMap[r.mapSetTo][r.destinationCompany];
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="ks-job-'+r.id+'.json"','Cache-Control':'no-store'});return res.end(JSON.stringify(job,null,2));
  }
  if(u.pathname==='/api/routes/assignees'&&method==='GET'){
@@ -388,7 +395,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(trailerId&&!trailer)return send(res,400,{error:'Nie znaleziono przypisanej naczepy'});
   if(trailer&&trailer.assigneeUsername&&trailer.assigneeUsername.toLowerCase()!==driver.toLowerCase())return send(res,409,{error:'Naczepa jest przypisana do innego kierowcy lub podwykonawcy'});
   const sourceCompany=str(a.sourceCompany,120),destinationCompany=str(a.destinationCompany,120);
-  const r={id:crypto.randomUUID(),trailerId:trailerId||null,trailerType:trailerType||trailer?.type||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
+  const mapSetRoute={};
+  if(a.catalogProfile==='snapshot'){
+   const mapSetFrom=cityId(from,nowaczykCities),mapSetTo=cityId(to,nowaczykCities);
+   if(!mapSetCompany(mapSetFrom,sourceCompany)||!mapSetCompany(mapSetTo,destinationCompany))return send(res,400,{error:'Wybierz obie firmy z listy dla właściwych miast na mapie Nowaczyk.'});
+   if(mapSetFrom===mapSetTo&&sourceCompany===destinationCompany)return send(res,400,{error:'Wybierz inną firmę rozładunku.'});
+   if(!str(a.cargo,120)||!Number.isSafeInteger(plannedKm)||plannedKm<=0)return send(res,400,{error:'Podaj ładunek i planowany dystans w pełnych kilometrach.'});
+   Object.assign(mapSetRoute,{mapSetFrom,mapSetTo});
+  }
+  const r={...mapSetRoute,id:crypto.randomUUID(),trailerId:trailerId||null,trailerType:trailerType||trailer?.type||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
   db.routes??=[];db.routes.push(r);await save(db);return send(res,201,r);
  }
  if(u.pathname==='/api/routes/progress'&&method==='POST'){
