@@ -1,4 +1,4 @@
-# Nowaczyk Transport — wspólny system 0.3.1
+# Nowaczyk Transport — wspólny system 0.3.2
 
 Ta paczka zawiera serwer strony, panele, źródła aplikacji Windows, DLL telemetrii,
 wbudowany importer zapisów i konfigurację budowania instalatora. To aktualizacja
@@ -24,10 +24,9 @@ w ustawieniach aplikacji Windows. Domyślna wartość zakłada adres
 
 ## Instalator aplikacji
 
-Push do `main` uruchamia testy i budowę instalatora na Windows. Plik EXE jest
-w artefakcie **Nowaczyk-Transport-Instalator**. Workflow można także uruchomić
-ręcznie w Actions. Wysłanie tagu `telemetry-v0.3.1` uruchamia ten sam build
-i publikuje instalator jako załącznik do wydania.
+Push do `main` uruchamia testy i kompilację Windows. Instalator jest publikowany
+w GitHub Releases i dostępny w zakładce **Telemetria** panelu kierowcy.
+Kopię instalatora z danego buildu znajdziesz też w artefaktach GitHub Actions.
 
 Lokalnie na Windows w katalogu `telemetry-app` uruchom `npm ci`, a następnie
 `npm run build:win`. Wynik znajdziesz w `telemetry-app/dist`.
@@ -36,8 +35,8 @@ Lokalnie na Windows w katalogu `telemetry-app` uruchom `npm ci`, a następnie
 
 1. Zainstaluj nowy EXE. Wskaż folder ETS2, np.
    D:\SteamLibrary\steamapps\common\Euro Truck Simulator 2.
-2. Przy wyłączonej grze kliknij „Zainstaluj plugin ETS2”. Istniejąca DLL otrzyma
-   kopię zapasową. Uruchom ETS2 i zaakceptuj komunikat SDK.
+2. Przy wyłączonej grze zapisz ustawienia. Aplikacja doinstaluje brakujący plugin.
+   Ręczne ponowne zainstalowanie pluginu tworzy kopię istniejącej DLL. Uruchom ETS2 i zaakceptuj komunikat SDK.
 3. W aplikacji otwórz panel i zaloguj się tym samym kontem, co na stronie.
 4. Włącz automatyczną synchronizację i zapisz ustawienia. Uruchom jazdę.
 5. Na stronie w Tachografie sprawdź prędkość, towar i masę. „Offline” oznacza

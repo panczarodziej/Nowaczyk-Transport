@@ -42,7 +42,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/telemetry-v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/telemetry-v'))
     needs: windows
     runs-on: ubuntu-latest
     permissions:
@@ -56,9 +56,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          tag="$GITHUB_REF_NAME"
+          installer=(Nowaczyk-Transport-Setup-*.exe)
+          version="${installer[0]#Nowaczyk-Transport-Setup-}"
+          tag="telemetry-v${version%.exe}"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "Tag does not match installer version: $tag" >&2
+            exit 1
+          fi
+          cp "${installer[0]}" Nowaczyk-Transport-Setup.exe
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" Nowaczyk-Transport-Setup-*.exe --clobber
+            gh release upload "$tag" Nowaczyk-Transport-Setup.exe --clobber
           else
-            gh release create "$tag" Nowaczyk-Transport-Setup-*.exe --verify-tag --title "$tag" --generate-notes
+            gh release create "$tag" Nowaczyk-Transport-Setup.exe --target "$GITHUB_SHA" --latest --title "$tag" --generate-notes
           fi
