@@ -532,14 +532,22 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/me')return send(res,200,{admin:auth(req)});
  if(u.pathname.startsWith('/api/admin/')){
   if(!auth(req))return send(res,401,{error:'Zaloguj się jako administrator.'});
-  if(u.pathname==='/api/admin/applications'&&method==='GET')return send(res,200,db.applications);
+  if(u.pathname==='/api/admin/applications'&&method==='GET'){
+   const cutoff=Date.now()-24*60*60*1000;
+   return send(res,200,db.applications.filter(x=>x.status!=='Przyjęte'||!(Date.parse(x.acceptedAt||x.date)<=cutoff)));
+  }
   if(u.pathname==='/api/admin/companies'&&method==='GET')return send(res,200,db.companies);
   if(u.pathname==='/api/admin/applications'&&method==='PATCH'){
    const a=await body(req),x=db.applications.find(x=>x.id===a.id);
    if(!x)return send(res,404,{error:'Nie znaleziono podania'});
    if(a.status&&!['Nowe','Przyjęte','Odrzucone'].includes(a.status))return send(res,400,{error:'Niepoprawny status'});
    if(a.companyId&&!db.companies.some(c=>c.id===a.companyId))return send(res,400,{error:'Nieznana firma'});
-   if(a.status)x.status=a.status;if(a.companyId){x.companyId=a.companyId;x.companyName=db.companies.find(c=>c.id===a.companyId).name}await save(db);return send(res,200,x);
+   if(a.status&&x.status!==a.status){
+    x.status=a.status;
+    if(a.status==='Przyjęte')x.acceptedAt=new Date().toISOString();
+    else delete x.acceptedAt;
+   }
+   if(a.companyId){x.companyId=a.companyId;x.companyName=db.companies.find(c=>c.id===a.companyId).name}await save(db);return send(res,200,x);
   }
   if(u.pathname==='/api/admin/companies'&&method==='POST'){
    const a=await body(req),name=str(a.name,90);if(name.length<2)return send(res,400,{error:'Podaj nazwę firmy'});
