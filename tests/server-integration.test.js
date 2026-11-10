@@ -39,6 +39,8 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal(secondTrailer.status,200);
  assert.notEqual(firstTrailer.data.id,secondTrailer.data.id);
  assert.equal((await req('/api/trailers',null,admin.cookie)).data.trailers.filter(t=>t.assigneeId===boss.id).length,2);
+ assert.equal((await req('/api/routes',route)).status,401);
+ assert.equal((await req('/api/routes',route,login.cookie)).status,403);
  const assigned=await req('/api/routes',route,dispatcher.cookie);assert.equal(assigned.status,201);
  // Website sessions cannot accept, even when a client name header is supplied.
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,{'X-Nowaczyk-Client':'desktop'})).status,403);

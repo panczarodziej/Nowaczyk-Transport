@@ -323,7 +323,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const me=who(req);return send(res,200,canDispatch(req)?(db.routes||[]):(db.routes||[]).filter(r=>r.driver.toLowerCase()===me.username.toLowerCase()&&r.companyId===me.companyId));
  }
  if(u.pathname==='/api/routes'&&method==='POST'){
-  if(!canDispatch(req))return send(res,403,{error:'Brak uprawnień'});
+  if(!who(req))return send(res,401,{error:'Sesja wygasła. Zaloguj się ponownie, aby zapisać trasę.'});
+  if(!canDispatch(req))return send(res,403,{error:'Trasy może przydzielać lub aktualizować Szef, Spedytor albo Administrator.'});
   const a=await body(req),from=str(a.from,120),to=str(a.to,120),driver=str(a.driver,100);
   if(!from||!to||!driver)return send(res,400,{error:'Podaj kierowcę, początek i koniec trasy'});
   const plannedKm=Number(a.plannedKm);
@@ -338,7 +339,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   db.routes??=[];db.routes.push(r);await save(db);return send(res,201,r);
  }
  if(u.pathname==='/api/routes/progress'&&method==='POST'){
-  if(!canDispatch(req))return send(res,403,{error:'Brak uprawnień'});
+  if(!who(req))return send(res,401,{error:'Sesja wygasła. Zaloguj się ponownie, aby zapisać trasę.'});
+  if(!canDispatch(req))return send(res,403,{error:'Trasy może przydzielać lub aktualizować Szef, Spedytor albo Administrator.'});
   const a=await body(req),r=(db.routes||[]).find(x=>x.id===a.id);
   if(!r)return send(res,404,{error:'Nie znaleziono trasy'});
   const km=Number(a.drivenKm);if(!Number.isFinite(km)||km<0||km>100000)return send(res,400,{error:'Nieprawidłowy przebieg'});
