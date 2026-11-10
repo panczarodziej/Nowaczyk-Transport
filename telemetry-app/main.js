@@ -115,7 +115,69 @@ function readTruckyRamps(){
   });
  });
 }
-app.whenReady().then(()=>{restoreEvents();startBridge();startReader();setInterval(()=>{if(!readerProcess)startReader()},10000);ipcMain.handle('desktop-login',(_,credentials)=>loginDesktop(credentials));ipcMain.handle('accept-driver-route',async(_,id)=>{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))return {ok:false,error:'Nieprawidłowe ID'};return driverRequest('/api/routes/accept',{method:'POST',body:JSON.stringify({routeId:id})})});ipcMain.handle('import-driver-route',async(_,id,ownTrailer)=>{try{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))throw Error('Nieprawidłowe ID');const job=await driverRequest('/api/routes/export?id='+encodeURIComponent(id));if(!job.ok)return job;if(!job.acceptedAt)return {ok:false,error:'Najpierw przyjmij trasę w aplikacji'};const picked=await dialog.showOpenDialog(win,{title:'Wybierz zapis game.sii z profilu ETS2 (menu profili)',properties:['openFile'],filters:[{name:'Zapis ETS2',extensions:['sii']}]});if(picked.canceled)return {ok:false,error:'Anulowano'};const ramps=ownTrailer===true?await readTruckyRamps():undefined;const r=require('./save-importer').importFile(picked.filePaths[0],job,ramps);return {ok:true,...r}}catch(e){return {ok:false,error:e.message}}});ipcMain.handle('open-driver-panel',()=>openDriverPanel());ipcMain.handle('driver-status',async()=>{const r=await driverRequest('/api/accounts/me');captureDriver=r.user?.username?.toLowerCase()||null;return {...r,desktopReady:!!desktopAuth&&desktopAuth.origin===baseUrl()&&desktopAuth.username.toLowerCase()===captureDriver}});ipcMain.handle('map-profile-get',()=>driverRequest('/api/driver/map-profile'));ipcMain.handle('map-profile-set',async(_,mapProfile)=>{if(!['promods','promods-pr'].includes(mapProfile))return {ok:false,error:'Nieprawidłowy profil'};return driverRequest('/api/driver/map-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mapProfile})})});ipcMain.handle('driver-routes',async()=>{const origin=baseUrl();const cookies=await driverSession().cookies.get({url:origin});const c=cookies.find(x=>x.name==='ks_session');if(!c)return {ok:false,error:'Zaloguj się w panelu kierowcy'};const r=await fetch(origin+'/api/routes',{headers:{Cookie:'ks_session='+c.value},signal:AbortSignal.timeout(9000)});if(r.status===401)return {ok:false,error:'Sesja wygasła. Zaloguj się ponownie formularzem w aplikacji, a potem pobierz zlecenia.'};if(!r.ok)return {ok:false,error:'Nie udało się pobrać zleceń: HTTP '+r.status};const data=await r.json();return {ok:true,routes:Array.isArray(data)?data:[]}});ipcMain.handle('export-driver-route',async(_,id)=>{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))return {ok:false,error:'Nieprawidłowe ID zlecenia'};const result=await driverRequest('/api/routes/export?id='+encodeURIComponent(id));if(!result.ok)return result;const destination=await dialog.showSaveDialog(win,{title:'Zapisz manifest zlecenia Nowaczyk Transport',defaultPath:'ks-job-'+id+'.json',filters:[{name:'JSON',extensions:['json']}]});if(destination.canceled||!destination.filePath)return {ok:false,error:'Anulowano'};fs.writeFileSync(destination.filePath,JSON.stringify(result,null,2),'utf8');return {ok:true,path:destination.filePath};});ipcMain.handle('sync-telemetry',()=>syncTelemetry());ipcMain.handle('sync-info',()=>({...syncInfo,readerError}));setInterval(()=>{if(settings().autoSync)syncTelemetry().catch(e=>{syncInfo={ok:false,error:e.message,at:new Date().toISOString()}})},20000);ipcMain.handle('plugin-status',(_,p)=>pluginStatus(p));ipcMain.handle('install-plugin',(_,p)=>installPlugin(p));ipcMain.handle('telemetry-status',()=>lastTelemetry?{...lastTelemetry,ageMs:Date.now()-lastTelemetry.receivedAt}:null);ipcMain.handle('get-settings',()=>settings());ipcMain.handle('save-settings',async(_,x)=>{
+async function listDriverRoutes(){const origin=baseUrl();const cookies=await driverSession().cookies.get({url:origin});const c=cookies.find(x=>x.name==='ks_session');if(!c)return {ok:false,error:'Zaloguj się w panelu kierowcy'};const r=await fetch(origin+'/api/routes',{headers:{Cookie:'ks_session='+c.value},signal:AbortSignal.timeout(9000)});if(r.status===401)return {ok:false,error:'Sesja wygasła. Zaloguj się ponownie formularzem w aplikacji, a potem pobierz zlecenia.'};if(!r.ok)return {ok:false,error:'Nie udało się pobrać zleceń: HTTP '+r.status};const data=await r.json();return {ok:true,routes:Array.isArray(data)?data:[]}}
+const autoDispatchFile=()=>path.join(app.getPath('userData'),'auto-dispatch.json');
+let autoDispatchBusy=false;
+let autoDispatchMessage='';
+function autoDispatchSettings(){
+ try{return JSON.parse(fs.readFileSync(autoDispatchFile(),'utf8'))}
+ catch(error){if(error.code!=='ENOENT')throw error;return {savePath:'',prepared:{}}}
+}
+function writeAutoDispatch(config){
+ const target=autoDispatchFile();
+ fs.writeFileSync(target+'.tmp',JSON.stringify(config));
+ fs.renameSync(target+'.tmp',target);
+}
+async function autoDispatch(){
+ if(autoDispatchBusy||!desktopAuth)return;
+ autoDispatchBusy=true;
+ try{
+  const config=autoDispatchSettings(),auth=desktopAuth;
+  if(!config.savePath)return;
+  if(auth.origin!==baseUrl())throw Error('Zaloguj się ponownie po zmianie serwera.');
+  if(!lastTelemetry||Date.now()-lastTelemetry.receivedAt>10000||lastTelemetry.onJob!==false){
+   autoDispatchMessage='Oczekiwanie na ETS2 i zakończenie aktywnego zlecenia.';
+   return;
+  }
+  const result=await listDriverRoutes();
+  if(!result.ok)throw Error(result.error);
+  const route=result.routes.filter(r=>r.driver?.toLowerCase()===auth.username.toLowerCase()&&['Przydzielona','Przyjęta'].includes(r.status)&&!Object.hasOwn(config.prepared,r.id))
+   .sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||'')))[0];
+  if(!route)return;
+  const exported=await driverRequest('/api/routes/export?id='+encodeURIComponent(route.id));
+  if(!exported.ok)throw Error(exported.error||'Nie udało się pobrać danych trasy.');
+  const ramps=await readTruckyRamps();
+  if(desktopAuth!==auth||autoDispatchSettings().savePath!==config.savePath)return;
+  const importer=require('./save-importer');
+  importer.plan(importer.decodeSave(fs.readFileSync(config.savePath)),exported,ramps);
+  if(!route.acceptedAt){
+   const accepted=await driverRequest('/api/routes/accept',{method:'POST',body:JSON.stringify({routeId:route.id})});
+   if(!accepted.ok)throw Error(accepted.error||'Nie udało się przyjąć trasy.');
+  }
+  if(desktopAuth!==auth||autoDispatchSettings().savePath!==config.savePath||Date.now()-lastTelemetry.receivedAt>10000||lastTelemetry.onJob!==false)return;
+  const prepared=importer.importFile(config.savePath,exported,ramps);
+  config.prepared[route.id]=true;
+  writeAutoDispatch(config);
+  autoDispatchMessage=prepared.notice;
+ }catch(error){autoDispatchMessage=error.message}
+ finally{autoDispatchBusy=false}
+}
+app.whenReady().then(()=>{
+ ipcMain.handle('auto-dispatch-status',()=>({enabled:!!autoDispatchSettings().savePath,message:autoDispatchMessage}));
+ ipcMain.handle('auto-dispatch-configure',async()=>{
+  const picked=await dialog.showOpenDialog(win,{title:'Wybierz stały ręczny zapis ETS2 dla automatycznych tras',properties:['openFile'],filters:[{name:'Zapis ETS2',extensions:['sii']}]});
+  if(picked.canceled)return;
+  const savePath=picked.filePaths[0];
+  if(path.basename(savePath).toLowerCase()!=='game.sii'||/^auto(?:save)?/i.test(path.basename(path.dirname(savePath))))throw Error('Wybierz game.sii z ręcznego zapisu.');
+  writeAutoDispatch({...autoDispatchSettings(),savePath});
+  autoDispatchMessage='Automatyczny import włączony. Wczytaj ręczny zapis, gdy trasa będzie gotowa.';
+ });
+ ipcMain.handle('auto-dispatch-disable',()=>{
+  writeAutoDispatch({...autoDispatchSettings(),savePath:''});
+  autoDispatchMessage='';
+ });
+ setInterval(()=>void autoDispatch(),15000);
+ restoreEvents();startBridge();startReader();setInterval(()=>{if(!readerProcess)startReader()},10000);ipcMain.handle('desktop-login',(_,credentials)=>loginDesktop(credentials));ipcMain.handle('accept-driver-route',async(_,id)=>{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))return {ok:false,error:'Nieprawidłowe ID'};return driverRequest('/api/routes/accept',{method:'POST',body:JSON.stringify({routeId:id})})});ipcMain.handle('import-driver-route',async(_,id,ownTrailer)=>{try{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))throw Error('Nieprawidłowe ID');const job=await driverRequest('/api/routes/export?id='+encodeURIComponent(id));if(!job.ok)return job;if(!job.acceptedAt)return {ok:false,error:'Najpierw przyjmij trasę w aplikacji'};const picked=await dialog.showOpenDialog(win,{title:'Wybierz zapis game.sii z profilu ETS2 (menu profili)',properties:['openFile'],filters:[{name:'Zapis ETS2',extensions:['sii']}]});if(picked.canceled)return {ok:false,error:'Anulowano'};const ramps=ownTrailer===true?await readTruckyRamps():undefined;const r=require('./save-importer').importFile(picked.filePaths[0],job,ramps);return {ok:true,...r}}catch(e){return {ok:false,error:e.message}}});ipcMain.handle('open-driver-panel',()=>openDriverPanel());ipcMain.handle('driver-status',async()=>{const r=await driverRequest('/api/accounts/me');captureDriver=r.user?.username?.toLowerCase()||null;return {...r,desktopReady:!!desktopAuth&&desktopAuth.origin===baseUrl()&&desktopAuth.username.toLowerCase()===captureDriver}});ipcMain.handle('map-profile-get',()=>driverRequest('/api/driver/map-profile'));ipcMain.handle('map-profile-set',async(_,mapProfile)=>{if(!['promods','promods-pr'].includes(mapProfile))return {ok:false,error:'Nieprawidłowy profil'};return driverRequest('/api/driver/map-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mapProfile})})});ipcMain.handle('driver-routes',listDriverRoutes);ipcMain.handle('export-driver-route',async(_,id)=>{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))return {ok:false,error:'Nieprawidłowe ID zlecenia'};const result=await driverRequest('/api/routes/export?id='+encodeURIComponent(id));if(!result.ok)return result;const destination=await dialog.showSaveDialog(win,{title:'Zapisz manifest zlecenia Nowaczyk Transport',defaultPath:'ks-job-'+id+'.json',filters:[{name:'JSON',extensions:['json']}]});if(destination.canceled||!destination.filePath)return {ok:false,error:'Anulowano'};fs.writeFileSync(destination.filePath,JSON.stringify(result,null,2),'utf8');return {ok:true,path:destination.filePath};});ipcMain.handle('sync-telemetry',()=>syncTelemetry());ipcMain.handle('sync-info',()=>({...syncInfo,readerError}));setInterval(()=>{if(settings().autoSync)syncTelemetry().catch(e=>{syncInfo={ok:false,error:e.message,at:new Date().toISOString()}})},20000);ipcMain.handle('plugin-status',(_,p)=>pluginStatus(p));ipcMain.handle('install-plugin',(_,p)=>installPlugin(p));ipcMain.handle('telemetry-status',()=>lastTelemetry?{...lastTelemetry,ageMs:Date.now()-lastTelemetry.receivedAt}:null);ipcMain.handle('get-settings',()=>settings());ipcMain.handle('save-settings',async(_,x)=>{
  const saved=save({...x,etsPath:x.etsPath||detectEts()});
  if(process.platform!=='win32'||!saved.etsPath||pluginStatus(saved.etsPath).installed)return saved;
  try{await installPlugin(saved.etsPath);return {...saved,pluginMessage:'Plugin ETS2 zainstalowany.'}}
