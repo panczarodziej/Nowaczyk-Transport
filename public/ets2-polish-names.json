@@ -1,0 +1,4 @@
+{
+  "cities": {"Mediolan":"milano","Rzym":"roma","Wiedeń":"wien","Praga":"prague","Paryż":"paris","Monachium":"munchen","Londyn":"london","Wenecja":"venezia"},
+  "cargo": {"Ryby":"fresh_fish","Świeże ryby":"fresh_fish","Palety":"pallets","Mleko":"milk","Ser":"cheese","Ziemniaki":"potatoes","Papier":"paper"}
+}

@@ -1,11 +1,18 @@
 "use strict";
 // Read-only validation of a received ETS2 job against a dispatch order.
 function norm(s){return String(s??'').normalize('NFKC').trim().toLocaleLowerCase('pl').replace(/\s+/g,' ')}
+const polishNames=require('./public/ets2-polish-names.json');
+function comparable(value,field){
+ const aliases=field==='cargo'?polishNames.cargo:field==='from'||field==='to'?polishNames.cities:null;
+ const key=norm(value);
+ const alias=aliases&&Object.entries(aliases).find(([label])=>norm(label)===key);
+ return alias?alias[1]:key;
+}
 function validateJob(route,t){
  if(!route||!t||typeof t!=='object')return {match:false,reasons:['Brak danych zlecenia lub telemetrii']};
  const checks=[['from','sourceCity','Miasto załadunku'],['to','destinationCity','Miasto rozładunku'],['sourceCompany','sourceCompany','Firma załadunku'],['destinationCompany','destinationCompany','Firma rozładunku'],['cargo','cargo','Towar']];
  const reasons=[];
- for(const [a,b,label] of checks){if(!route[a]){reasons.push(label+': nieokreślone w zleceniu');continue}if(!t[b]){reasons.push(label+': brak danych z gry');continue}if(norm(route[a])!==norm(t[b]))reasons.push(label+': niezgodność')}
+ for(const [a,b,label] of checks){if(!route[a]){reasons.push(label+': nieokreślone w zleceniu');continue}if(!t[b]){reasons.push(label+': brak danych z gry');continue}if(comparable(route[a],a)!==comparable(t[b],a))reasons.push(label+': niezgodność')}
  const expected=Number(route.cargoTons),actual=Number(t.cargoMassKg)/1000;
  if(!Number.isFinite(expected)||expected<=0)reasons.push('Masa nieokreślona w zleceniu');
  else if(!Number.isFinite(actual)||actual<=0)reasons.push('Brak prawidłowej masy z ETS2');

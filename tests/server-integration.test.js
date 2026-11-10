@@ -11,7 +11,7 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/budgets',null,admin.cookie)).data[0].initialCents,100);
  const created=await req('/api/accounts',{username:'driver1',password:'driver-password-only',role:'driver'},admin.cookie);assert.equal(created.status,201);
  const login=await req('/api/accounts/login',{username:'driver1',password:'driver-password-only'});assert.equal(login.status,200);
- const route={from:'Krakow',to:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'pallets',cargoTons:18,plannedKm:600,driver:'driver1'};
+ const route={from:'Krakow',to:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'Palety',cargoTons:18,plannedKm:600,driver:'driver1'};
  const dispatcherAccount=await req('/api/accounts',{username:'dispatcher1',password:'dispatcher-password-only',role:'dispatcher'},admin.cookie);
  assert.equal(dispatcherAccount.status,201);
  const dispatcher=await req('/api/accounts/login',{username:'dispatcher1',password:'dispatcher-password-only'});
@@ -72,6 +72,7 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/driver/map-profile',{mapProfile:'unsupported'},desktop.cookie)).status,400);
  const exported=await req('/api/routes/export?id='+assigned.data.id,null,login.cookie);assert.ok(exported.data.acceptedAt);
 assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.company,'transinet');
+ assert.equal(exported.data.cargo.name,'Palety');assert.equal(exported.data.cargo.id,'pallets');
  const packet={x:12,z:45,speedKmh:54,activity:'Jazda',cargo:'pallets',cargoMassKg:18000,onJob:true,cargoLoaded:true};assert.equal((await req('/api/fleet/position',packet,login.cookie)).status,200);
  const event={type:'job-started',eventKey:'test-event-123456',sourceCity:'Krakow',destinationCity:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'pallets',cargoMassKg:18000};
  assert.equal((await req('/api/telemetry/events',event,login.cookie)).data.event.matchStatus,'matched');assert.equal((await req('/api/telemetry/events',event,login.cookie)).data.duplicate,true);

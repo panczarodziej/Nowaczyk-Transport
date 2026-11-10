@@ -319,9 +319,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const {europe,poland,middleEast}=require('./public/ets2-catalog.json');
   const cities={...europe,...middleEast,...(mapProfile==='promods-pr'?poland:{})};
   const normalize=value=>String(value).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').replace(/ł/g,'l').trim();
+  const polishNames=require('./public/ets2-polish-names.json');
+  function alias(entries,value){
+   return Object.entries(entries).find(([label])=>normalize(label)===normalize(value))?.[1];
+  }
   function cityId(name){
    const key=normalize(name);
    if(Object.hasOwn(cities,key))return key;
+   const translated=alias(polishNames.cities,name);
+   if(translated&&Object.hasOwn(cities,translated))return translated;
    const matches=Object.entries(cities).filter(([,city])=>normalize(city[0])===key);
    return matches.length===1?matches[0][0]:name;
   }
@@ -330,7 +336,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const key=normalize(name||'').replace(/[^a-z0-9]/g,'');
    return Object.hasOwn(companyAliases,key)?companyAliases[key]:name||'';
   }
-  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:cityId(r.from),company:companyId(r.sourceCompany)},to:{country:r.toCountry||'',city:cityId(r.to),company:companyId(r.destinationCompany)},cargo:{name:r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,trailerType:['firanka','chlodnia'].includes(r.trailerType)?r.trailerType:null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
+  const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:cityId(r.from),company:companyId(r.sourceCompany)},to:{country:r.toCountry||'',city:cityId(r.to),company:companyId(r.destinationCompany)},cargo:{name:r.cargo||'',id:alias(polishNames.cargo,r.cargo)||r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,trailerType:['firanka','chlodnia'].includes(r.trailerType)?r.trailerType:null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="ks-job-'+r.id+'.json"','Cache-Control':'no-store'});return res.end(JSON.stringify(job,null,2));
  }
  if(u.pathname==='/api/routes/assignees'&&method==='GET'){
