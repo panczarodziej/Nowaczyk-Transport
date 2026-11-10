@@ -20,7 +20,9 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  const updated=await req('/api/accounts/update',{username:'dispatcher1',role:'boss'},admin.cookie);
  assert.equal(updated.data.role,'boss');
  assert.equal((await fetch(base+'/spedytor.html',{headers:{Cookie:dispatcher.cookie}})).status,200);
- assert.equal((await req('/api/accounts',null,dispatcher.cookie)).status,403);
+ assert.equal((await req('/api/accounts',null,dispatcher.cookie)).status,200);
+ assert.equal((await fetch(base+'/system.html',{headers:{Cookie:dispatcher.cookie}})).status,200);
+ assert.equal((await req('/api/accounts/update',{username:'admin',password:'another-password'},dispatcher.cookie)).status,403);
  const assigned=await req('/api/routes',route,dispatcher.cookie);assert.equal(assigned.status,201);
  // Website sessions cannot accept, even when a client name header is supplied.
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,{'X-Nowaczyk-Client':'desktop'})).status,403);

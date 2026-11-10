@@ -33,9 +33,9 @@ async function save(db){
 }
 function send(res,code,obj,headers={}){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(obj))}
 function who(req){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1],v=token&&sessions.get(token);if(!v)return null;if(typeof v==='number')return v>Date.now()?{role:'admin',username:'admin'}:null;const account=accounts.get(v.username.toLowerCase());return v.expires>Date.now()&&account?.active?{...safeAccount(account),expires:v.expires}:null}
-function auth(req){return who(req)?.role==='admin'}
+function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId==='ks')}
 function canDispatch(req){return ['admin','dispatcher','boss'].includes(who(req)?.role)}
-function canDrive(req){return ['admin','driver','probation'].includes(who(req)?.role)}
+function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
 function body(req){return new Promise((resolve,reject)=>{let s='';req.on('data',b=>{s+=b;if(s.length>150000)req.destroy()});req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch{reject(new Error('Niepoprawny JSON'))}});req.on('error',reject)})}
 function str(s,max=100){return typeof s==='string'?s.trim().slice(0,max):''}
 function client(req){return req.socket.remoteAddress||'unknown'}
@@ -322,7 +322,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/fleet'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const fleet=db.fleet||[];
-  if(me.role==='admin')return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>['driver','probation','admin'].includes(a.role)&&a.active).map(safeAccount)});
+  if(auth(req))return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>['driver','probation','admin'].includes(a.role)&&a.active).map(safeAccount)});
   return send(res,200,{fleet:fleet.filter(v=>v.driverAccountId===me.id&&v.companyId===me.companyId)});
  }
  if(u.pathname==='/api/fleet'&&method==='POST'){
@@ -363,6 +363,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),username=str(a.username,50),pass=str(a.password,300),role=str(a.role,40),companyId=str(a.companyId,80)||'ks';
   if(!/^[a-zA-Z0-9._-]{3,50}$/.test(username)||pass.length<12||!ROLES.includes(role))return send(res,400,{error:'Login: 3–50 znaków, hasło min. 12 znaków, poprawna rola'});
+  if(role==='admin'&&who(req).role!=='admin')return send(res,403,{error:'Tylko administrator może utworzyć konto administratora'});
   if(accounts.has(username.toLowerCase()))return send(res,409,{error:'Login zajęty'});
   const acct={id:crypto.randomUUID(),username,role,companyId,active:true,...passwordHash(pass)};
   accounts.set(username.toLowerCase(),acct);db.accounts=[...accounts.values()];await save(db);return send(res,201,safeAccount(acct));
@@ -371,6 +372,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),acct=accounts.get(str(a.username,50).toLowerCase());
   if(!acct)return send(res,404,{error:'Nie znaleziono konta'});
+  if(who(req).role!=='admin'&&(acct.role==='admin'||a.role==='admin'))return send(res,403,{error:'Tylko administrator może zarządzać kontami administratorów'});
   if(acct.role==='admin'&&a.active===false)return send(res,400,{error:'Nie można zablokować administratora'});
   if(typeof a.active==='boolean')acct.active=a.active;
   if(a.password!==undefined){if(typeof a.password!=='string'||a.password.length<12||a.password.length>300)return send(res,400,{error:'Hasło min. 12 znaków'});Object.assign(acct,passwordHash(a.password))}

@@ -9,7 +9,7 @@ const roleCell=cell(x.role==='admin'?'Administrator':'');
 if(x.role!=='admin'){
  const select=document.getElementById('role').cloneNode(true);
  select.removeAttribute('id');
- select.querySelector('[value=admin]').remove();
+ select.querySelector('[value=admin]')?.remove();
  select.value=x.role;
  select.setAttribute('aria-label','Rola konta '+x.username);
  select.onchange=async()=>{
@@ -23,5 +23,5 @@ if(x.role!=='admin'){
  roleCell.append(select);
 }
 cell(x.companyId);cell(x.active?'Aktywne':'Zablokowane');const td=document.createElement('td');if(x.role!=='admin'){const b=document.createElement('button');b.textContent=x.active?'Zablokuj':'Odblokuj';b.onclick=async()=>{try{await api('/api/accounts/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:x.username,active:!x.active})});refresh()}catch(e){msg.textContent=e.message}};td.append(b)}tr.append(td);tb.append(tr)}}catch(e){msg.textContent=e.message}}
-document.getElementById('create').onsubmit=async e=>{e.preventDefault();try{await api('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value,role:role.value,companyId:companyId.value})});msg.textContent='Konto utworzone';e.target.reset();refresh()}catch(err){msg.textContent=err.message}};refresh();
+document.getElementById('create').onsubmit=async e=>{e.preventDefault();try{await api('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value,role:role.value,companyId:companyId.value})});msg.textContent='Konto utworzone';e.target.reset();refresh()}catch(err){msg.textContent=err.message}};api('/api/accounts/me').then(({user})=>{if(user?.role==='boss')document.querySelector('#role option[value=admin]').remove();refresh()}).catch(e=>{msg.textContent=e.message});
 </script></html>
