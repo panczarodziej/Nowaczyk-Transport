@@ -1,9 +1,26 @@
 'use strict';
 // Importer rynku ładunków: korzysta wyłącznie z ofert i firm obecnych w zapisie.
 const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');
+const {inflateSync}=require('node:zlib');
+const maxSaveBytes=100*1024*1024;
+function decodeSave(bytes){
+ let payload=bytes;
+ if(bytes.toString('ascii',0,4)==='ScsC'){
+  if(bytes.length<72||(bytes.length-56)%16!==0)throw Error('Niepełny plik zapisu ScsC.');
+  try{
+   const key=Buffer.from('2a5fcb1791d22fb60245b3d8369ed0b2c27371563fbf1f3c9edf6b11825a5d0a','hex');
+   const decipher=crypto.createDecipheriv('aes-256-cbc',key,bytes.subarray(36,52));
+   decipher.setAutoPadding(false);
+   const compressed=Buffer.concat([decipher.update(bytes.subarray(56)),decipher.final()]);
+   payload=inflateSync(compressed,{maxOutputLength:maxSaveBytes});
+  }catch{throw Error('Nie udało się odczytać zawartości zapisu ScsC.')}
+ }
+ if(payload.toString('ascii',0,4)==='BSII')throw Error('Zapis zawiera binarny format BSII. Importer obsługuje tekstowy format SiiNunit.');
+ return payload.toString('utf8');
+}
 function norm(v){return String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ł/g,'l').toLowerCase().replace(/[^a-z0-9]/g,'')}
 function units(text){
- if(!/^\uFEFF?SiiNunit\s*\{/.test(text))throw Error('Zapis jest zakodowany. W ETS2 ustaw g_save_format "2", zapisz grę i wróć do menu profili. Wybierz nowy game.sii.');
+ if(!/^\uFEFF?SiiNunit\s*\{/.test(text))throw Error('Plik nie zawiera tekstowego zapisu SiiNunit.');
  const out=[];const re=/^\s*(\w+)\s*:\s*([^\s{]+)\s*\{[^{}]*^\s*\}/gm;let m;
  while((m=re.exec(text)))out.push({type:m[1],id:m[2],text:m[0],start:m.index,end:re.lastIndex});
  if(!out.length)throw Error('Nieobsługiwany format jednostek zapisu');return out;
@@ -30,11 +47,11 @@ function plan(text,job){
 }
 function importFile(file,job){
  if(path.basename(file).toLowerCase()!=='game.sii')throw Error('Wybierz plik game.sii');
- const bytes=fs.readFileSync(file);if(bytes.length>100*1024*1024)throw Error('Zapis zbyt duży');const original=bytes.toString('utf8');const result=plan(original,job);
+ const bytes=fs.readFileSync(file);if(bytes.length>maxSaveBytes)throw Error('Zapis zbyt duży');const original=decodeSave(bytes);const result=plan(original,job);
  if(!fs.readFileSync(file).equals(bytes))throw Error('Gra zmieniła zapis podczas importu. Wróć do menu profili.');
  const suffix=Date.now()+'-'+crypto.randomBytes(4).toString('hex'),backup=file+'.nowaczyk-'+suffix+'.bak',tmp=file+'.nowaczyk-'+suffix+'.tmp';
  fs.copyFileSync(file,backup,fs.constants.COPYFILE_EXCL);
  try{fs.writeFileSync(tmp,result.text,{encoding:'utf8',flag:'wx'});if(!fs.readFileSync(file).equals(bytes))throw Error('Zapis zmienił się podczas importu. Nie został nadpisany.');fs.renameSync(tmp,file)}finally{if(fs.existsSync(tmp))fs.unlinkSync(tmp)}
  const {text,...details}=result;return {...details,backup};
 }
-module.exports={plan,importFile};
+module.exports={plan,importFile,decodeSave};
