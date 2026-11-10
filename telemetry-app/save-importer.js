@@ -34,23 +34,26 @@ function plan(text,job){
  function company(side){const matches=companies.filter(u=>{const parts=u.id.slice(17).split('.');return norm(parts.pop())===norm(side.city)&&norm(parts.join('.'))===norm(side.company)});if(matches.length!==1)throw Error('Nie znaleziono jednoznacznej firmy '+side.company+' w '+side.city+'. W zleceniu użyj identyfikatorów z aktywnej mapy ETS2.');return matches[0]}
  const from=company(source),to=company(dest);
  if(from.id===to.id)throw Error('Załadunek i rozładunek muszą być różne');
- const offers=list.filter(u=>u.type==='job_offer_data');
- const refs=[...from.text.matchAll(/^\s*job_offer\[\d+\]:\s*(\S+)/gm)].map(m=>m[1]);
- // Preserve trailer, unit count and compatibility at source. Never borrow an arbitrary trailer.
- const eligible=offers.filter(u=>refs.includes(u.id)&&norm(field(u,'cargo')?.replace(/^cargo\./,''))===norm(cargo.id||cargo.name));
- if(!eligible.length)throw Error('W firmie załadunku brak szablonu tego towaru. Import wstrzymany: nie można dobrać zgodnej naczepy i masy przez zgadywanie.');
- const trailerType=job.trailerType;
+ const refs=new Set([...from.text.matchAll(/^\s*job_offer\[\d+\]:\s*(\S+)/gm)].map(m=>m[1]));
+ const definitions=new Map(list.filter(unit=>unit.type==='trailer_def').map(unit=>[unit.id,unit]));
  const allowedTypes={firanka:['curtainside',/(?:^|\.)curtain(?:_|$)/i],chlodnia:['refrigerated',/(?:^|\.)reefer(?:_|$)/i]};
- const expected=Object.hasOwn(allowedTypes,trailerType)?allowedTypes[trailerType]:null;
- const slot=expected?eligible.find(offer=>{
+ const expected=Object.hasOwn(allowedTypes,job.trailerType)?allowedTypes[job.trailerType]:null;
+ const options=list.filter(offer=>{
+  if(offer.type!=='job_offer_data'||!refs.has(offer.id)||!field(offer,'units_count'))return false;
   const ref=field(offer,'trailer_definition');
   if(!ref)return false;
-  const definition=list.find(unit=>unit.type==='trailer_def'&&unit.id===ref);
+  if(!expected)return true;
+  const definition=definitions.get(ref);
   const body=definition&&field(definition,'body_type');
   return body?body===expected[0]:expected[1].test((definition&&field(definition,'source_name'))||ref);
- }):eligible[0];
- if(!slot)throw Error('W zapisie brak oferty z tym towarem i wybranym typem naczepy: '+(trailerType==='firanka'?'plandeka':'chłodnia')+'.');
- if(!field(slot,'trailer_definition')||!field(slot,'units_count'))throw Error('Brak definicji naczepy lub liczby jednostek towaru.');
+ });
+ const cargoId=offer=>field(offer,'cargo')?.replace(/^cargo\./,'');
+ const slot=options.find(offer=>norm(cargoId(offer))===norm(cargo.id||cargo.name));
+ if(!slot){
+  const available=[...new Set(options.map(cargoId).filter(Boolean))].sort();
+  const type=job.trailerType==='firanka'?'plandeka':job.trailerType==='chlodnia'?'chłodnia':'dowolny';
+  throw Error('W firmie załadunku brak zgodnego szablonu tego towaru (typ: '+type+'). '+(available.length?'Towary dostępne w tym zapisie: '+available.join(', ')+'.':'W tym zapisie firma nie ma ofert dla wybranego typu.'));
+ }
  const km=Number(job.plannedKm);if(!Number.isSafeInteger(km)||km<=0||km>30000)throw Error('Zlecenie musi mieć całkowity dystans 1–30000 km');
  const economy=list.find(u=>u.type==='economy');const clock=Number(economy&&field(economy,'game_time'));if(!Number.isSafeInteger(clock)||clock<0)throw Error('Brak czasu gry w zapisie');
  const target=to.id.slice(17);let replacement=replaceField(slot.text,'target',JSON.stringify(target));replacement=replaceField(replacement,'expiration_time',clock+7*24*60);replacement=replaceField(replacement,'shortest_distance_km',km);
