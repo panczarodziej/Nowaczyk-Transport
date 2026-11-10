@@ -32,9 +32,9 @@ async function save(db){
  const temp=DB+'.tmp';fs.writeFileSync(temp,JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(temp,DB);
 }
 function send(res,code,obj,headers={}){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(obj))}
-function who(req){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1],v=token&&sessions.get(token);if(!v)return null;if(typeof v==='number')return v>Date.now()?{role:'admin',username:'admin'}:null;return v.expires>Date.now()?v:null}
+function who(req){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1],v=token&&sessions.get(token);if(!v)return null;if(typeof v==='number')return v>Date.now()?{role:'admin',username:'admin'}:null;const account=accounts.get(v.username.toLowerCase());return v.expires>Date.now()&&account?.active?{...safeAccount(account),expires:v.expires}:null}
 function auth(req){return who(req)?.role==='admin'}
-function canDispatch(req){return ['admin','dispatcher'].includes(who(req)?.role)}
+function canDispatch(req){return ['admin','dispatcher','boss'].includes(who(req)?.role)}
 function canDrive(req){return ['admin','driver','probation'].includes(who(req)?.role)}
 function body(req){return new Promise((resolve,reject)=>{let s='';req.on('data',b=>{s+=b;if(s.length>150000)req.destroy()});req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch{reject(new Error('Niepoprawny JSON'))}});req.on('error',reject)})}
 function str(s,max=100){return typeof s==='string'?s.trim().slice(0,max):''}
@@ -45,7 +45,7 @@ let mutationTail=Promise.resolve();
 const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].includes(req.method)){const previous=mutationTail;mutationTail=new Promise(resolve=>{release=resolve});await previous}try{
  const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();
  // Centrum floty: dane pozycji z uwierzytelnionego konta; NIE jest to jeszcze integracja z ETS2.
- if(u.pathname==='/api/client-release'&&method==='GET'){let url='https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download/Nowaczyk-Transport-Setup.exe';try{const candidate=new URL(process.env.TELEMETRY_DOWNLOAD_URL||'');if(candidate.protocol==='https:')url=candidate.href}catch{}return send(res,200,{version:'0.3.2',available:!!url,url})}
+ if(u.pathname==='/api/client-release'&&method==='GET'){let url='https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download/Nowaczyk-Transport-Setup.exe';try{const candidate=new URL(process.env.TELEMETRY_DOWNLOAD_URL||'');if(candidate.protocol==='https:')url=candidate.href}catch{}return send(res,200,{version:'0.3.3',available:!!url,url})}
  if(u.pathname==='/api/telemetry/me'&&method==='GET'){const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});const p=db.fleetPositions?.[me.username.toLowerCase()]||null;return send(res,200,{position:p,online:!!p&&Date.now()-Date.parse(p.updatedAt)<45000,events:(db.telemetryEvents||[]).filter(e=>e.driver===me.username.toLowerCase()).slice(-30)})}
  if(u.pathname==='/api/fleet/positions'&&method==='GET'){
   if(!canDispatch(req))return send(res,403,{error:'Tylko administrator lub dyspozytor'});
@@ -85,7 +85,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/trailers'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const list=db.trailers||[];
-  if(['admin','dispatcher'].includes(me.role))return send(res,200,{trailers:list,assignees:[...accounts.values()].filter(a=>a.active&&['driver','probation','subcontractor'].includes(a.role)).map(safeAccount)});
+  if(['admin','dispatcher','boss'].includes(me.role))return send(res,200,{trailers:list,assignees:[...accounts.values()].filter(a=>a.active&&['driver','probation','subcontractor'].includes(a.role)).map(safeAccount)});
   return send(res,200,{trailers:list.filter(t=>t.assigneeId===me.id)});
  }
  if(u.pathname==='/api/trailers'&&method==='POST'){
@@ -414,6 +414,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:who(req)?'/moj-panel.html':'/system-login.html'});return res.end()}
  if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/flota-online.html'&&!canDispatch(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);
+ if(file==='stanowisko.html'){res.writeHead(302,{Location:canDispatch(req)?'/spedytor.html':'/system-login.html'});return res.end()}
  if(file==='pracownik.html'){res.writeHead(302,{Location:'/driver.html'});return res.end()}
  if(file==='index.html'&&u.pathname!=='/system.html')return send(res,403,{error:'Panel administratora wymaga logowania.'});
  if(file==='data.json'||file.includes('..')||file.includes('\\'))return send(res,403,{error:'Brak dostępu'});

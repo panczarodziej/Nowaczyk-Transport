@@ -17,6 +17,10 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await fetch(base+'/spedytor.html',{headers:{Cookie:dispatcher.cookie}})).status,200);
  assert.equal((await fetch(base+'/moj-panel.html',{headers:{Cookie:login.cookie}})).status,200);
  assert.equal((await fetch(base+'/spedytor.html',{headers:{Cookie:login.cookie}})).status,403);
+ const updated=await req('/api/accounts/update',{username:'dispatcher1',role:'boss'},admin.cookie);
+ assert.equal(updated.data.role,'boss');
+ assert.equal((await fetch(base+'/spedytor.html',{headers:{Cookie:dispatcher.cookie}})).status,200);
+ assert.equal((await req('/api/accounts',null,dispatcher.cookie)).status,403);
  const assigned=await req('/api/routes',route,dispatcher.cookie);assert.equal(assigned.status,201);
  // Website sessions cannot accept, even when a client name header is supplied.
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,{'X-Nowaczyk-Client':'desktop'})).status,403);
@@ -31,7 +35,7 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  const otherRoute=await req('/api/routes',{...route,driver:'other-driver'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:otherRoute.data.id},desktop.cookie,desktopHeaders)).status,403);
  const second=await req('/api/routes',{...route,to:'Poznan'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:second.data.id},desktop.cookie,desktopHeaders)).status,200);
  const meDesktop=await req('/api/accounts/me',null,desktop.cookie);assert.equal(meDesktop.data.user.desktopToken,undefined);
- const panel=await fetch(base+'/system.html',{headers:{Cookie:admin.cookie}});assert.equal(panel.status,200);assert.match(await panel.text(),/fetch\('\/api\/accounts\/me'/);
+ const panel=await fetch(base+'/system.html',{headers:{Cookie:admin.cookie}});assert.equal(panel.status,200);assert.match(await panel.text(),/href="\/uzytkownicy.html"/);
  for(const mapProfile of ['promods','promods-pr']){
   assert.equal((await req('/api/driver/map-profile',{mapProfile},desktop.cookie)).status,200);
   assert.equal((await req('/api/driver/map-profile',null,desktop.cookie)).data.mapProfile,mapProfile);
