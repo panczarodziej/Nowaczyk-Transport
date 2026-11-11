@@ -58,7 +58,7 @@ while($true) {
   $delivered=($b[4303] -ne 0)
   $loaded=$onJob -and ($b[1564] -ne 0)
   $event=''
-  if($hadValidSample -and $loaded -and -not $lastLoaded){$event='job-started'}
+  if($loaded -and -not $lastLoaded){$event='job-started'}
   if($hadValidSample -and $delivered -and -not $lastDelivered){$event='job-delivered'}
   $hadValidSample=$true
   $lastDelivered=$delivered

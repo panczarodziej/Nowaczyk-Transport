@@ -31,6 +31,7 @@ const mapDriver=$('mapDriver');
 const markers=new Map();
 let fleetMap=null;
 let latestPositions=[];
+let centeredOnFleet=false;
 function showMapError(message){
  const error=$('mapError');
  error.textContent=message;
@@ -98,6 +99,13 @@ function updateMap(positions){
     if(progress<1)entry.frame=requestAnimationFrame(move);
    };
    entry.frame=requestAnimationFrame(move);
+  }
+ }
+ if(!centeredOnFleet&&!mapDriver.value){
+  const active=positions.find(p=>p.online&&visible.has(p.driver));
+  if(active){
+   fleetMap.setView(markers.get(active.driver).point,Math.max(4,fleetMap.getZoom()));
+   centeredOnFleet=true;
   }
  }
  for(const [name,entry] of markers)if(!visible.has(name)){
