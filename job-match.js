@@ -17,7 +17,14 @@ function jobIdentityReasons(route,t){
  if(!route||!t||typeof t!=='object')return ['Brak danych zlecenia lub telemetrii'];
  const checks=[['from','sourceCity','Miasto załadunku'],['to','destinationCity','Miasto rozładunku'],['sourceCompany','sourceCompany','Firma załadunku'],['destinationCompany','destinationCompany','Firma rozładunku'],['cargo','cargo','Towar']];
  const reasons=[];
- for(const [a,b,label] of checks){if(!route[a]){reasons.push(label+': nieokreślone w zleceniu');continue}if(!t[b]){reasons.push(label+': brak danych z gry');continue}if(![route[a],a==='from'?route.mapSetFrom:a==='to'?route.mapSetTo:null].filter(Boolean).some(value=>comparable(value,a)===comparable(t[b],a)))reasons.push(label+': niezgodność')}
+ for(const [a,b,label] of checks){
+  if(!route[a]){reasons.push(label+': nieokreślone w zleceniu');continue}
+  const id=t[b+'Id'];
+  const values=[a==='cargo'&&id?id.replace(/^cargo\./i,''):id,t[b]].filter(Boolean);
+  if(!values.length){reasons.push(label+': brak danych z gry');continue}
+  const expected=[route[a],a==='from'?route.mapSetFrom:a==='to'?route.mapSetTo:null].filter(Boolean);
+  if(!expected.some(value=>values.some(actual=>comparable(value,a)===comparable(actual,a))))reasons.push(label+': niezgodność');
+ }
  return reasons;
 }
 function validateJob(route,t){

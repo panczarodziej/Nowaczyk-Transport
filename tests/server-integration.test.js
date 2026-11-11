@@ -103,7 +103,16 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(summary.data.km,602.3);
  assert.equal(summary.data.deliveries,1);
  assert.equal((await req('/api/company/summary',null,login.cookie)).status,403);
- const me=await req('/api/telemetry/me',null,login.cookie);assert.equal(me.data.position.cargoMassKg,18000);assert.equal(me.data.events.length,3);assert.equal((await req('/api/fleet/positions',null,login.cookie)).status,403);
+ const secondDelivery={type:'job-delivered',eventKey:'second-delivery-123456',sourceCityId:'krakow',destinationCityId:'poznan',sourceCompanyId:'transinet',destinationCompanyId:'tradeaux',cargoId:'cargo.pallets',jobDeliveredDistanceKm:312.54};
+ const secondResult=await req('/api/telemetry/events',secondDelivery,desktop.cookie);
+ assert.equal(secondResult.status,201);
+ assert.equal(secondResult.data.event.mileageRouteId,second.data.id);
+ assert.equal(secondResult.data.event.distanceKm,312.5);
+ assert.equal((await req('/api/telemetry/events',secondDelivery,desktop.cookie)).data.duplicate,true);
+ const updatedSummary=await req('/api/company/summary',null,admin.cookie);
+ assert.equal(updatedSummary.data.km,914.8);
+ assert.equal(updatedSummary.data.deliveries,2);
+ const me=await req('/api/telemetry/me',null,login.cookie);assert.equal(me.data.position.cargoMassKg,18000);assert.equal(me.data.events.length,4);assert.equal((await req('/api/fleet/positions',null,login.cookie)).status,403);
  // Parallel writes must not overwrite each other in the single-process store.
  const writes=await Promise.all(Array.from({length:6},(_,i)=>req('/api/routes',{...route,to:'City'+i},admin.cookie)));assert.ok(writes.every(x=>x.status===201));assert.equal((await req('/api/routes',null,admin.cookie)).data.length,9);
  assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},login.cookie)).status,403);

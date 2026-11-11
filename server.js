@@ -345,6 +345,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const existing=db.telemetryEvents.find(e=>e.driver===driver&&e.eventKey===eventKey);
   if(existing)return send(res,200,{ok:true,duplicate:true,event:existing});
   const telemetry={cargoMassKg:Number.isFinite(a.cargoMassKg)&&a.cargoMassKg>0?a.cargoMassKg:null,odometerKm:Number.isFinite(a.odometerKm)?a.odometerKm:null,cargo:str(a.cargo,120),sourceCity:str(a.sourceCity,120),destinationCity:str(a.destinationCity,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120)};
+  for(const field of ['cargoId','sourceCityId','destinationCityId','sourceCompanyId','destinationCompanyId']){
+   telemetry[field]=str(a[field],120);
+  }
+  const deliveredDistance=a.jobDeliveredDistanceKm;
+  telemetry.jobDeliveredDistanceKm=Number.isFinite(deliveredDistance)&&deliveredDistance>0&&deliveredDistance<=100000?deliveredDistance:null;
   const candidates=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===(me.companyId||MAIN_COMPANY_ID)&&r.status!=='Zakończona');
   const checks=candidates.map(r=>({routeId:r.id,...validateJob(r,telemetry)}));
   const matches=candidates.filter(r=>r.acceptedAt&&checks.find(check=>check.routeId===r.id).match);
@@ -352,16 +357,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const mileageMatches=candidates.filter(r=>r.acceptedAt&&!r.deliveredAt&&jobIdentityReasons(r,telemetry).length===0);
   const mileageRoute=mileageMatches.length===1?mileageMatches[0]:null;
   const event={id:crypto.randomUUID(),eventKey,driver,companyId:me.companyId||MAIN_COMPANY_ID,type,telemetry,routeId:route?.id||null,mileageRouteId:mileageRoute?.id||null,matchStatus:route?'matched':'unmatched',checks,verified:false,settlementAllowed:false,receivedAt:new Date().toISOString()};
-  if(mileageRoute&&type==='job-delivered'&&Number.isFinite(telemetry.odometerKm)){
+  if(mileageRoute&&type==='job-delivered'){
    const previous=db.telemetryEvents.find(e=>(e.mileageRouteId||e.routeId)===mileageRoute.id&&e.driver===driver&&e.companyId===event.companyId&&e.type==='job-started'&&Number.isFinite(e.telemetry?.odometerKm));
-   if(previous?.type==='job-started'&&Number.isFinite(previous.telemetry?.odometerKm)){
-    const distance=telemetry.odometerKm-previous.telemetry.odometerKm;
-    if(distance>=0&&distance<=100000){
-     event.distanceKm=Math.round(distance*10)/10;
-     mileageRoute.drivenKm=Math.max(mileageRoute.drivenKm||0,event.distanceKm);
-     mileageRoute.deliveredAt=event.receivedAt;
-     if(mileageRoute.drivenKm>0)mileageRoute.status='W trasie';
-    }
+   const odometerDistance=previous&&Number.isFinite(telemetry.odometerKm)?telemetry.odometerKm-previous.telemetry.odometerKm:null;
+   const distance=telemetry.jobDeliveredDistanceKm??odometerDistance;
+   if(distance!==null&&distance>=0&&distance<=100000){
+    event.distanceKm=Math.round(distance*10)/10;
+    mileageRoute.drivenKm=Math.max(mileageRoute.drivenKm||0,event.distanceKm);
+    mileageRoute.deliveredAt=event.receivedAt;
+    if(mileageRoute.drivenKm>0)mileageRoute.status='W trasie';
    }
   }
   db.telemetryEvents.push(event);if(db.telemetryEvents.length>5000)db.telemetryEvents.splice(0,db.telemetryEvents.length-5000);
