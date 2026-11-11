@@ -70,14 +70,15 @@ function showManualCargo(){
 }
 cargoPicker.addEventListener('change',showManualCargo);
 $('cargo').addEventListener('input',updateCompanySuggestions);
-let updatingCargoOptions=false;
 function destinationCandidates(){
  const {cities,depots}=activeCatalog();
  const city=translatedCity(val('to')),country=normalizeLocation(val('toCountry'));
  if(!city||!country)return null;
  const matching=new Set(Object.entries(cities).filter(([id,[name,countryId]])=>countryMatches(country,countryId)&&(normalizeLocation(id)===city||normalizeLocation(name)===city)).map(([id])=>id));
  const names=new Set();
- for(const [id,name] of [...depots,...profileDepots])if(matching.has(id))names.add(name);
+ const matchedDepots=depots.filter(([id])=>matching.has(id));
+ const availableDepots=matchedDepots.length||$('catalogProfile').value==='snapshot'?matchedDepots:profileDepots.filter(([id])=>matching.has(id));
+ for(const [,name] of availableDepots)names.add(name);
  for(const route of routes)if(translatedCity(route.to)===city&&countryMatches(country,normalizeLocation(route.toCountry)))names.add(route.destinationCompany);
  return [...names].filter(Boolean);
 }
