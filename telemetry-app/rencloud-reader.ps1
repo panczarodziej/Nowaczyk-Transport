@@ -60,18 +60,20 @@ while($true) {
   $event=''
   if($loaded -and -not $lastLoaded){$event='job-started'}
   if($hadValidSample -and $delivered -and -not $lastDelivered){$event='job-delivered'}
-  $hadValidSample=$true
-  $lastDelivered=$delivered
-  $lastLoaded=$loaded
   $payload=@{
    speedKmh=[math]::Round($speed,2)
    cargoMassKg=[math]::Round([math]::Max(0,$cargoMass),1)
    fuelLiters=[math]::Max(0,$fuel)
    odometerKm=[math]::Max(0,$odometer)
+   cargoId=(S $b 2556)
    cargo=(S $b 2620)
+   destinationCityId=(S $b 2684)
    destinationCity=(S $b 2748)
+   destinationCompanyId=(S $b 2812)
    destinationCompany=(S $b 2876)
+   sourceCityId=(S $b 2940)
    sourceCity=(S $b 3004)
+   sourceCompanyId=(S $b 3068)
    sourceCompany=(S $b 3132)
    worldX=(F64 $b 2200)
    worldY=(F64 $b 2208)
@@ -82,12 +84,22 @@ while($true) {
    event=$event
   }
   if($onJob -and $payload.cargo) { $lastJob=$payload.Clone() }
-  if($event -eq 'job-delivered' -and $lastJob) {
-   foreach($key in @('cargo','cargoMassKg','sourceCity','sourceCompany','destinationCity','destinationCompany')) { $payload[$key]=$lastJob[$key] }
+  if($event -eq 'job-delivered') {
+   $distance=F32 $b 1460
+   if($distance -gt 0 -and $distance -le 100000){$payload.jobDeliveredDistanceKm=$distance}
+   if($lastJob) {
+    foreach($key in @('cargo','cargoId','cargoMassKg','sourceCity','sourceCityId','sourceCompany','sourceCompanyId','destinationCity','destinationCityId','destinationCompany','destinationCompanyId')) {
+     if(-not $payload[$key]){$payload[$key]=$lastJob[$key]}
+    }
+   }
   }
   $json=ConvertTo-Json -InputObject $payload -Compress -Depth 3
   Report 'Połączono z pamięcią telemetrii'
-  Invoke-RestMethod -Uri 'http://127.0.0.1:38271/v1/telemetry' -Method Post -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 2 | Out-Null
+  Invoke-RestMethod -Uri 'http://127.0.0.1:38271/v1/telemetry' -Method Post -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 2 -ErrorAction Stop | Out-Null
+  $hadValidSample=$true
+  $lastDelivered=$delivered
+  $lastLoaded=$loaded
+  if($event -eq 'job-delivered'){$lastJob=$null}
  } catch {
   Report ("Blad odczytu/wysylki: " + $_.Exception.Message)
  }
