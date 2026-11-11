@@ -1,6 +1,6 @@
 'use strict';
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const {validateJob}=require('./job-match');
+const {validateJob,jobIdentityReasons}=require('./job-match');
 const PORT=Number(process.env.PORT||3000),ROOT=path.join(__dirname,'public'),DB=process.env.DATA_FILE||path.join(__dirname,'data.json');
 const password=process.env.ADMIN_PASSWORD;
 if(!password || password.length<12){console.error('Ustaw ADMIN_PASSWORD (min. 12 znaków) przed startem.');process.exit(1)}
@@ -149,6 +149,21 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,200,state);
  }
  if(u.pathname==='/api/telemetry/me'&&method==='GET'){const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});const p=db.fleetPositions?.[me.username.toLowerCase()]||null;return send(res,200,{position:p,online:!!p&&Date.now()-Date.parse(p.updatedAt)<45000,events:(db.telemetryEvents||[]).filter(e=>e.driver===me.username.toLowerCase()).slice(-30)})}
+ if(u.pathname==='/api/company/summary'&&method==='GET'){
+  if(!canDispatch(req))return send(res,403,{error:'Tylko kierownictwo i dyspozytorzy'});
+  const companyId=who(req).companyId||MAIN_COMPANY_ID;
+  const routes=(db.routes||[]).filter(route=>route.companyId===companyId);
+  const drivers=[...accounts.values()].filter(account=>account.active&&account.companyId===companyId&&['driver','probation'].includes(account.role));
+  const now=Date.now();
+  return send(res,200,{
+   km:Math.round(routes.reduce((sum,route)=>sum+(Number(route.drivenKm)||0),0)*10)/10,
+   deliveries:routes.filter(route=>route.deliveredAt||route.status==='Zakończona').length,
+   openRoutes:routes.filter(route=>!route.deliveredAt&&route.status!=='Zakończona').length,
+   drivers:drivers.length,
+   online:drivers.filter(account=>now-Date.parse(db.fleetPositions?.[account.username.toLowerCase()]?.updatedAt)<45000).length,
+   vehicles:(db.fleet||[]).filter(vehicle=>vehicle.companyId===companyId).length
+  });
+ }
  if(u.pathname==='/api/fleet/positions'&&method==='GET'){
   if(!canDispatch(req))return send(res,403,{error:'Tylko administrator lub dyspozytor'});
   const now=Date.now();
@@ -162,7 +177,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(account.active&&['driver','probation'].includes(account.role)&&!Object.hasOwn(reports,key))reports[key]={driver:account.username,companyId:account.companyId};
   }
   const positions=Object.values(reports).map(p=>{
-   const candidates=(db.routes||[]).filter(r=>r.driver?.toLowerCase()===p.driver.toLowerCase()&&r.companyId===p.companyId&&r.acceptedAt&&['Przyjęta','W trasie'].includes(r.status));
+   const candidates=(db.routes||[]).filter(r=>r.driver?.toLowerCase()===p.driver.toLowerCase()&&r.companyId===p.companyId&&r.acceptedAt&&!r.deliveredAt&&['Przyjęta','W trasie'].includes(r.status));
    const inProgress=candidates.filter(r=>r.status==='W trasie');
    const route=inProgress.length===1?inProgress[0]:candidates.length===1?candidates[0]:null;
    const delivery=deliveries.get(p.driver.toLowerCase());
@@ -331,18 +346,21 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(existing)return send(res,200,{ok:true,duplicate:true,event:existing});
   const telemetry={cargoMassKg:Number.isFinite(a.cargoMassKg)&&a.cargoMassKg>0?a.cargoMassKg:null,odometerKm:Number.isFinite(a.odometerKm)?a.odometerKm:null,cargo:str(a.cargo,120),sourceCity:str(a.sourceCity,120),destinationCity:str(a.destinationCity,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120)};
   const candidates=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===(me.companyId||MAIN_COMPANY_ID)&&r.status!=='Zakończona');
-  const norm=x=>String(x||'').trim().toLocaleLowerCase('pl');
-  const matches=candidates.filter(r=>r.acceptedAt&&validateJob(r,telemetry).match);
+  const checks=candidates.map(r=>({routeId:r.id,...validateJob(r,telemetry)}));
+  const matches=candidates.filter(r=>r.acceptedAt&&checks.find(check=>check.routeId===r.id).match);
   const route=matches.length===1?matches[0]:null;
-  const event={id:crypto.randomUUID(),eventKey,driver,companyId:me.companyId||MAIN_COMPANY_ID,type,telemetry,routeId:route?.id||null,matchStatus:route?'matched':'unmatched',checks:candidates.map(r=>({routeId:r.id,...validateJob(r,telemetry)})),verified:false,settlementAllowed:false,receivedAt:new Date().toISOString()};
-  if(route&&type==='job-delivered'&&Number.isFinite(telemetry.odometerKm)){
-   const previous=db.telemetryEvents.findLast(e=>e.routeId===route.id&&e.driver===driver&&e.companyId===event.companyId&&['job-started','job-delivered'].includes(e.type));
+  const mileageMatches=candidates.filter(r=>r.acceptedAt&&!r.deliveredAt&&jobIdentityReasons(r,telemetry).length===0);
+  const mileageRoute=mileageMatches.length===1?mileageMatches[0]:null;
+  const event={id:crypto.randomUUID(),eventKey,driver,companyId:me.companyId||MAIN_COMPANY_ID,type,telemetry,routeId:route?.id||null,mileageRouteId:mileageRoute?.id||null,matchStatus:route?'matched':'unmatched',checks,verified:false,settlementAllowed:false,receivedAt:new Date().toISOString()};
+  if(mileageRoute&&type==='job-delivered'&&Number.isFinite(telemetry.odometerKm)){
+   const previous=db.telemetryEvents.find(e=>(e.mileageRouteId||e.routeId)===mileageRoute.id&&e.driver===driver&&e.companyId===event.companyId&&e.type==='job-started'&&Number.isFinite(e.telemetry?.odometerKm));
    if(previous?.type==='job-started'&&Number.isFinite(previous.telemetry?.odometerKm)){
     const distance=telemetry.odometerKm-previous.telemetry.odometerKm;
     if(distance>=0&&distance<=100000){
      event.distanceKm=Math.round(distance*10)/10;
-     route.drivenKm=Math.max(route.drivenKm||0,event.distanceKm);
-     if(route.drivenKm>0)route.status='W trasie';
+     mileageRoute.drivenKm=Math.max(mileageRoute.drivenKm||0,event.distanceKm);
+     mileageRoute.deliveredAt=event.receivedAt;
+     if(mileageRoute.drivenKm>0)mileageRoute.status='W trasie';
     }
    }
   }
@@ -629,7 +647,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
  }
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:homePath});return res.end()}
- if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/flota-online.html'&&!canDispatch(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
+ if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/firma.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(['/flota-online.html','/firma.html'].includes(u.pathname)&&!canDispatch(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);
  if(file==='stanowisko.html'){res.writeHead(302,{Location:canDispatch(req)?'/spedytor.html':'/system-login.html'});return res.end()}
  if(file==='pracownik.html'){res.writeHead(302,{Location:'/driver.html'});return res.end()}

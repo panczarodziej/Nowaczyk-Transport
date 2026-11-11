@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nowaczyk Transport — Podsumowanie firmy</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f1f4f7;color:#182c43;font:16px "Segoe UI",Arial,sans-serif}
+header{background:#223242;color:white;padding:22px 5%;font-weight:700}
+main{max-width:1100px;margin:auto;padding:32px 20px}
+a{color:#12568c;text-decoration:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+article{background:white;border:1px solid #d1dfee;border-radius:12px;padding:20px}
+article h2{font-size:16px;margin:0 0 12px;color:#52687f}
+article strong{font-size:27px}
+</style>
+</head>
+<body>
+<header>Nowaczyk Transport</header>
+<main>
+<a href="/">← Wróć do panelu</a>
+<h1>Podsumowanie firmy</h1>
+<p id="status" role="status">Pobieranie danych…</p>
+<div class="grid">
+<article><h2>Przejechane kilometry</h2><strong id="km">—</strong></article>
+<article><h2>Dostawy</h2><strong id="deliveries">—</strong></article>
+<article><h2>Otwarte zlecenia</h2><strong id="openRoutes">—</strong></article>
+<article><h2>Kierowcy online</h2><strong id="online">—</strong></article>
+<article><h2>Pojazdy w firmie</h2><strong id="vehicles">—</strong></article>
+</div>
+</main>
+<script>
+const fields=['deliveries','openRoutes','vehicles'];
+async function refresh(){
+ const status=document.getElementById('status');
+ try{
+  const response=await fetch('/api/company/summary',{cache:'no-store'});
+  if(!response.ok)throw Error('Nie udało się pobrać danych firmy.');
+  const data=await response.json();
+  for(const key of fields)document.getElementById(key).textContent=data[key].toLocaleString('pl-PL');
+  document.getElementById('km').textContent=data.km.toLocaleString('pl-PL')+' km';
+  document.getElementById('online').textContent=data.online+' / '+data.drivers;
+  status.textContent='Dane z zapisanych zleceń i bieżącej telemetrii.';
+ }catch(error){status.textContent=error.message}
+ setTimeout(refresh,15000);
+}
+refresh();
+</script>
+</body>
+</html>
