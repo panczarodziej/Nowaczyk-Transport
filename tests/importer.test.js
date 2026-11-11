@@ -137,3 +137,32 @@ trailer_def : _owned {
  assert.match(plan(fixture,route,{source:point}).text,/cargo: cargo.tomatoes/);
  assert.throws(()=>plan(fixture,route),/brak zgodnego szablonu/);
 });
+
+test('ETS2 1.57 recognizes owned assigned trailer with stale false flags',()=>{
+ const point='(1, 2, 3)(1; 0, 0, 0)';
+ const fixture=text.replace(/\n}\s*$/, `
+player : _player {
+ current_job: null
+ selected_job: null
+ assigned_trailer: _owned_trailer
+ my_trailer: _owned_trailer
+ my_trailer_attached: false
+ assigned_trailer_connected: false
+}
+trailer : _owned_trailer {
+ trailer_definition: _reefer
+ slave_trailer: null
+}
+trailer_def : _reefer {
+ body_type: refrigerated
+}
+trailer_def : trailer_def.scs.box.single_3.reefer {
+ body_type: refrigerated
+}
+`);
+ const route={...job,trailerType:'chlodnia',to:{...job.to,deliveryPlacements:{easy:[point]}}};
+ const refrigerated=fixture.replace('trailer_def.scs.box\n','trailer_def.scs.box.single_3.reefer\n');
+ assert.match(plan(refrigerated,route,{source:point}).text,/is_cargo_market_job: true/);
+ const detached=refrigerated.replace('my_trailer: _owned_trailer','my_trailer: null');
+ assert.throws(()=>plan(detached,route,{source:point}),/aktywnej własnej naczepy/);
+});
