@@ -70,19 +70,35 @@ function showManualCargo(){
 }
 cargoPicker.addEventListener('change',showManualCargo);
 $('cargo').addEventListener('input',updateCompanySuggestions);
+let updatingCargoOptions=false;
+function destinationCandidates(){
+ const {cities,depots}=activeCatalog();
+ const city=translatedCity(val('to')),country=normalizeLocation(val('toCountry'));
+ if(!city||!country)return null;
+ const matching=new Set(Object.entries(cities).filter(([id,[name,countryId]])=>countryMatches(country,countryId)&&(normalizeLocation(id)===city||normalizeLocation(name)===city)).map(([id])=>id));
+ const names=new Set();
+ for(const [id,name] of [...depots,...profileDepots])if(matching.has(id))names.add(name);
+ for(const route of routes)if(translatedCity(route.to)===city&&countryMatches(country,normalizeLocation(route.toCountry)))names.add(route.destinationCompany);
+ return [...names].filter(Boolean);
+}
+function availableReceivers(cargo){
+ return (destinationCandidates()||[]).filter(name=>destinationCompatibility(name,cargo)===true);
+}
 function updateCargoSuggestions(){
  const source=val('sourceCompany'),outgoing=outgoingCargo(source);
  const labels=new Map(Object.entries(polishNames.cargo).map(([label,id])=>[id,label]));
  const previous=cargoPicker.value;
  // Unknown companies may use the trailer catalogue, but are not represented as verified ETS2 offers.
  const allIds=[...new Set(Object.values(cargoTypes||{}).flat())];
- const ids=allIds.filter(id=>availableForTrailer(id)&&(!source||!outgoing||outgoing.includes(id)));
+ const candidates=destinationCandidates();
+ const ids=allIds.filter(id=>availableForTrailer(id)&&(!source||!outgoing||outgoing.includes(id))&&(!candidates||availableReceivers(id).length>0));
  const options=ids.map(id=>new Option(labels.get(id)||id,id)).sort((a,b)=>a.text.localeCompare(b.text,'pl'));
  cargoPicker.replaceChildren(new Option('Wybierz ładunek',''),...options);
  if(options.some(option=>option.value===previous))cargoPicker.value=previous;
  cargoPicker.disabled=!options.length;
+ $('destinationCompany').disabled=!options.length;
  $('cargo').hidden=true;
- $('cargoHint').textContent=!source?'Wybierz firmę załadunku, aby zobaczyć jej towary.':!options.length?'BŁĄD: Ta firma nie ma towarów zgodnych z naczepą. Zmień firmę lub naczepę.':outgoing?'Towary zgodne z firmą załadunku i naczepą.':'Brak danych firmy: pokazano towary naczepy, bez potwierdzenia oferty ETS2.';
+ $('cargoHint').textContent=!source?'Wybierz firmę załadunku.':!options.length?'Towar niedostępny na tej trasie: brak zgodnego odbiorcy lub towaru dla naczepy. Zmień miasto, firmę albo naczepę.':candidates?'Pokazano tylko towary z odbiorcą w wybranym mieście.':'Wybierz miasto i kraj rozładunku, aby odfiltrować niedostępne towary.';
  updateCompanySuggestions();
 }
 $('trailerType').addEventListener('change',updateCargoSuggestions);
@@ -141,7 +157,7 @@ function updateCitySuggestions(){
   $(list).replaceChildren(...names.filter(name=>!term||normalizeLocation(name).includes(term)).sort((a,b)=>a.localeCompare(b,'pl')).map(name=>new Option(name,name)));
  }
 }
-for(const id of ['from','to'])$(id).addEventListener('input',updateCitySuggestions);
+for(const id of ['from','to'])$(id).addEventListener('input',()=>{updateCitySuggestions();if(id==='to')updateCargoSuggestions();});
 function updateCountrySuggestions(){
  const {cities}=activeCatalog();
  const countries=[...new Set(Object.values(cities).map(([,country])=>countryLabel(country)).filter(Boolean))];
@@ -149,11 +165,11 @@ function updateCountrySuggestions(){
  const term=focused?.id==='fromCountry'||focused?.id==='toCountry'?normalizeLocation(focused.value):'';
  $('catalogCountries').replaceChildren(...countries.filter(name=>!term||normalizeLocation(name).includes(term)).sort((a,b)=>a.localeCompare(b,'pl')).map(name=>new Option(name,name)));
 }
-for(const id of ['fromCountry','toCountry'])$(id).addEventListener('input',updateCountrySuggestions);
+for(const id of ['fromCountry','toCountry'])$(id).addEventListener('input',()=>{updateCountrySuggestions();updateCitySuggestions();if(id==='toCountry')updateCargoSuggestions();});
 function updateCatalog(){
  updateCountrySuggestions();
  updateCitySuggestions();
- updateCompanySuggestions();
+ updateCargoSuggestions();
 }
 for(const id of ['catalogProfile','catalogMiddleEast'])$(id).addEventListener('change',updateCatalog);
 fetch('/ets2-catalog.json').then(response=>{
