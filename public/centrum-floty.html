@@ -44,6 +44,7 @@ function initMap(){
  const crs=L.extend({},L.CRS.Simple,{transformation:new L.Transformation(scale,-minX*scale,-scale,-minZ*scale)});
  const bounds=L.latLngBounds([-maxZ,minX],[-minZ,maxX]);
  fleetMap=L.map('fleetMap',{crs,minZoom:0,maxZoom:8,maxBounds:bounds,maxBoundsViscosity:1,scrollWheelZoom:true}).setView([0,0],1);
+ fleetMap.attributionControl.setPrefix('<a href="https://leafletjs.com/">Leaflet</a>');
  const tiles=L.tileLayer('https://map.charlws.com/ets2/promods/tiles/{z}/{x}/{y}.png',{minZoom:0,maxNativeZoom:8,maxZoom:8,bounds,noWrap:true});
  tiles.on('tileerror',()=>showMapError('Część kafelków ProMods jest niedostępna. Możesz otworzyć mapę źródłową z linku poniżej.'));
  tiles.on('tileload',()=>showMapError(''));
