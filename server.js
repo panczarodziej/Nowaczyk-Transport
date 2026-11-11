@@ -123,12 +123,26 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const previous=db.tachographs?.[key];
   if(method==='GET')return send(res,200,previous||null);
   const a=await body(req);
-  const modes=['driving','work','available','rest'];
-  const startCountry=str(a.startCountry,60),endCountry=str(a.endCountry,60);
-  if(!modes.includes(a.mode)||!Number.isInteger(a.minutes)||a.minutes<0||a.minutes>1440||typeof a.out!=='boolean'||typeof a.ferry!=='boolean'){
-   return send(res,400,{error:'Sprawdź aktywność, przełączniki i czas w minutach (0–1440).'});
+  const now=new Date().toISOString();
+  const active=previous?.active===true;
+  let state;
+  if(a.action==='stop'){
+   const endCountry=str(a.country,60);
+   if(!active)return send(res,409,{error:'Tachograf nie jest uruchomiony.'});
+   if(!endCountry)return send(res,400,{error:'Podaj kraj zakończenia.'});
+   state={...previous,active:false,endCountry,endedAt:now};
+  }else{
+   const starting=a.action==='start';
+   if(!starting&&a.action!=='update')return send(res,400,{error:'Wybierz Start, Stop albo zapisz aktywność.'});
+   if(starting===active)return send(res,409,{error:active?'Tachograf jest już uruchomiony.':'Najpierw uruchom tachograf.'});
+   const startCountry=starting?str(a.country,60):previous.startCountry;
+   if(!startCountry)return send(res,400,{error:'Podaj kraj rozpoczęcia.'});
+   const modes=['driving','work','available','rest'];
+   if(!modes.includes(a.mode)||!Number.isInteger(a.minutes)||a.minutes<0||a.minutes>1440||typeof a.out!=='boolean'||typeof a.ferry!=='boolean'){
+    return send(res,400,{error:'Sprawdź aktywność, przełączniki i czas w minutach (0–1440).'});
+   }
+   state={mode:a.mode,minutes:a.minutes,out:a.out,ferry:a.ferry,startCountry,endCountry:'',active:true,startedAt:starting?now:previous.startedAt,endedAt:null};
   }
-  const state={mode:a.mode,minutes:a.minutes,out:a.out,ferry:a.ferry,startCountry,endCountry,startedAt:previous?.mode===a.mode?previous.startedAt:new Date().toISOString()};
   db.tachographs??={};
   db.tachographs[key]=state;
   await save(db);
@@ -623,6 +637,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(file==='data.json'||file.includes('..')||file.includes('\\'))return send(res,403,{error:'Brak dostępu'});
  const full=path.resolve(ROOT,file);if(!full.startsWith(ROOT+path.sep))return send(res,403,{error:'Brak dostępu'});
  if(!fs.existsSync(full)||!fs.statSync(full).isFile())return send(res,404,{error:'Nie znaleziono'});
- res.writeHead(200,{'Content-Type':mime[path.extname(full)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Content-Security-Policy':"default-src 'self' 'unsafe-inline' data:; connect-src 'self'"});fs.createReadStream(full).pipe(res);
+ const basePolicy="default-src 'self' 'unsafe-inline' data:; connect-src 'self'";
+ const fleetMapPolicy="; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css; img-src 'self' data: https://map.charlws.com/ets2/promods/tiles/";
+ const policy=basePolicy+(file==='centrum-floty.html'?fleetMapPolicy:'');
+ res.writeHead(200,{'Content-Type':mime[path.extname(full)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Content-Security-Policy':policy});fs.createReadStream(full).pipe(res);
 }catch(e){console.error(e);if(!res.headersSent)send(res,500,{error:'Błąd serwera'})}finally{release?.()}});
 initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT))).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});

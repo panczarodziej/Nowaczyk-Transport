@@ -11,6 +11,7 @@
 <div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Pozycja</th><th>Ładunek</th><th>Prędkość</th><th>Trasa</th><th>Ostatnia dostawa</th></tr></thead><tbody id="rows"></tbody></table></div></div><section class="panel" id="mapPanel">
 <h2>Mapa kierowców</h2>
 <div class="fleet-map-tools"><label>Kierowca <select id="mapDriver"><option value="">Wybierz kierowcę</option></select></label><button id="fullscreen" type="button">Pełny ekran</button><span id="mapStatus" class="muted" role="status"></span></div>
+<p id="mapError" class="muted" role="status" hidden></p>
 <div id="fleetMap" aria-label="Mapa ProMods z pozycjami kierowców"></div>
 <p><a href="https://map.charlws.com/ets2/promods/index.html" target="_blank" rel="noopener noreferrer">Mapa ProMods · charlws</a></p>
 </section></main><script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script><script>
@@ -30,15 +31,23 @@ const mapDriver=$('mapDriver');
 const markers=new Map();
 let fleetMap=null;
 let latestPositions=[];
+function showMapError(message){
+ const error=$('mapError');
+ error.textContent=message;
+ error.hidden=!message;
+}
 function initMap(){
- if(!window.L){$('mapStatus').textContent='Nie udało się wczytać mapy.';return}
+ if(!window.L){showMapError('Nie udało się wczytać skryptu mapy. Odśwież stronę.');return}
  // Źródło kafelków stosuje kwadratowy zakres świata ETS2 i współrzędne X / Z.
  const minX=-96450.79,maxX=205684.109,minZ=-178324.047,maxZ=123810.844;
  const scale=256/(maxX-minX);
  const crs=L.extend({},L.CRS.Simple,{transformation:new L.Transformation(scale,-minX*scale,-scale,-minZ*scale)});
  const bounds=L.latLngBounds([-maxZ,minX],[-minZ,maxX]);
  fleetMap=L.map('fleetMap',{crs,minZoom:0,maxZoom:8,maxBounds:bounds,maxBoundsViscosity:1,scrollWheelZoom:true}).setView([0,0],1);
- L.tileLayer('https://map.charlws.com/ets2/promods/tiles/{z}/{x}/{y}.png',{minZoom:0,maxNativeZoom:8,maxZoom:8,bounds,noWrap:true}).addTo(fleetMap);
+ const tiles=L.tileLayer('https://map.charlws.com/ets2/promods/tiles/{z}/{x}/{y}.png',{minZoom:0,maxNativeZoom:8,maxZoom:8,bounds,noWrap:true});
+ tiles.on('tileerror',()=>showMapError('Część kafelków ProMods jest niedostępna. Możesz otworzyć mapę źródłową z linku poniżej.'));
+ tiles.on('tileload',()=>showMapError(''));
+ tiles.addTo(fleetMap);
 }
 function routeLabel(p){
  return p.dispatchRoute?[p.dispatchRoute.from,p.dispatchRoute.to].join(' → '):'Brak przyjętej trasy';
