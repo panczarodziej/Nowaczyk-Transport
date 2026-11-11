@@ -116,6 +116,24 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();
  // Centrum floty: dane pozycji z uwierzytelnionego konta; NIE jest to jeszcze integracja z ETS2.
  if(u.pathname==='/api/client-release'&&method==='GET'){let url='https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download/Nowaczyk-Transport-Setup.exe';try{const candidate=new URL(process.env.TELEMETRY_DOWNLOAD_URL||'');if(candidate.protocol==='https:')url=candidate.href}catch{}return send(res,200,{version:'0.3.4',available:!!url,url})}
+ if(u.pathname==='/api/tachograph'&&['GET','POST'].includes(method)){
+  const me=who(req);
+  if(!me||!canDrive(req))return send(res,403,{error:'Wymagane konto kierowcy'});
+  const key=me.id;
+  const previous=db.tachographs?.[key];
+  if(method==='GET')return send(res,200,previous||null);
+  const a=await body(req);
+  const modes=['driving','work','available','rest'];
+  const startCountry=str(a.startCountry,60),endCountry=str(a.endCountry,60);
+  if(!modes.includes(a.mode)||!Number.isInteger(a.minutes)||a.minutes<0||a.minutes>1440||typeof a.out!=='boolean'||typeof a.ferry!=='boolean'){
+   return send(res,400,{error:'Sprawdź aktywność, przełączniki i czas w minutach (0–1440).'});
+  }
+  const state={mode:a.mode,minutes:a.minutes,out:a.out,ferry:a.ferry,startCountry,endCountry,startedAt:previous?.mode===a.mode?previous.startedAt:new Date().toISOString()};
+  db.tachographs??={};
+  db.tachographs[key]=state;
+  await save(db);
+  return send(res,200,state);
+ }
  if(u.pathname==='/api/telemetry/me'&&method==='GET'){const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});const p=db.fleetPositions?.[me.username.toLowerCase()]||null;return send(res,200,{position:p,online:!!p&&Date.now()-Date.parse(p.updatedAt)<45000,events:(db.telemetryEvents||[]).filter(e=>e.driver===me.username.toLowerCase()).slice(-30)})}
  if(u.pathname==='/api/fleet/positions'&&method==='GET'){
   if(!canDispatch(req))return send(res,403,{error:'Tylko administrator lub dyspozytor'});

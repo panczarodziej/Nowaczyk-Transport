@@ -1,5 +1,19 @@
-<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Centrum floty</title><style>body{margin:0;background:#0d1421;color:#f1f5fa;font:16px system-ui}main{max-width:1150px;margin:auto;padding:30px}h1{margin-bottom:4px}.muted{color:#a7b4c8}.panel{background:#182438;border:1px solid #344158;border-radius:16px;padding:20px;margin:18px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #354158}a{color:#8ac4ff}.status{font-weight:700}button{padding:10px;border:0;border-radius:7px;cursor:pointer}small{color:#a7b4c8}</style><main><a href="/">← Panel Nowaczyk Transport</a><h1>Centrum floty</h1><p class="muted">Pozycje i statusy kierowców z telemetrii ETS2.</p><div class="panel"><h2>Pozycje pojazdów</h2><p id="state" class="muted">Ładowanie…</p>
-<div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Pozycja</th><th>Ładunek</th><th>Prędkość</th><th>Trasa</th><th>Ostatnia dostawa</th></tr></thead><tbody id="rows"></tbody></table></div></div></main><script>
+<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Centrum floty</title><style>body{margin:0;background:#0d1421;color:#f1f5fa;font:16px system-ui}main{max-width:1150px;margin:auto;padding:30px}h1{margin-bottom:4px}.muted{color:#a7b4c8}.panel{background:#182438;border:1px solid #344158;border-radius:16px;padding:20px;margin:18px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #354158}a{color:#8ac4ff}.status{font-weight:700}button{padding:10px;border:0;border-radius:7px;cursor:pointer}small{color:#a7b4c8}#fleetMap{height:clamp(380px,70vh,1080px);background:#484e66;border-radius:10px}
+#mapPanel:fullscreen{margin:0;border-radius:0;box-sizing:border-box;overflow:auto}
+#mapPanel:fullscreen #fleetMap{height:calc(100vh - 155px)}
+.driver-pin{background:none;border:none}
+.driver-pin span{display:block;width:18px;height:18px;border:2px solid white;border-radius:50%;background:#e1aa45;box-shadow:0 0 7px #13202d}
+.driver-pin .moving{background:#249d61}
+.driver-pin .offline{background:#747e90}
+.fleet-map-tools{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+.fleet-map-tools select{max-width:100%;font:inherit}
+</style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"><main><a href="/">← Panel Nowaczyk Transport</a><h1>Centrum floty</h1><p class="muted">Pozycje i statusy kierowców z telemetrii ETS2.</p><div class="panel"><h2>Pozycje pojazdów</h2><p id="state" class="muted">Ładowanie…</p>
+<div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Pozycja</th><th>Ładunek</th><th>Prędkość</th><th>Trasa</th><th>Ostatnia dostawa</th></tr></thead><tbody id="rows"></tbody></table></div></div><section class="panel" id="mapPanel">
+<h2>Mapa kierowców</h2>
+<div class="fleet-map-tools"><label>Kierowca <select id="mapDriver"><option value="">Wybierz kierowcę</option></select></label><button id="fullscreen" type="button">Pełny ekran</button><span id="mapStatus" class="muted" role="status"></span></div>
+<div id="fleetMap" aria-label="Mapa ProMods z pozycjami kierowców"></div>
+<p><a href="https://map.charlws.com/ets2/promods/index.html" target="_blank" rel="noopener noreferrer">Mapa ProMods · charlws</a></p>
+</section></main><script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function driverState(p){
  if(!p.online)return 'Offline';
@@ -12,11 +26,100 @@ function locationLabel(p){
  const location=city||coordinates;
  return location?(p.online?location:'Ostatnia: '+location):'Brak pozycji';
 }
+const mapDriver=$('mapDriver');
+const markers=new Map();
+let fleetMap=null;
+let latestPositions=[];
+function initMap(){
+ if(!window.L){$('mapStatus').textContent='Nie udało się wczytać mapy.';return}
+ // Źródło kafelków stosuje kwadratowy zakres świata ETS2 i współrzędne X / Z.
+ const minX=-96450.79,maxX=205684.109,minZ=-178324.047,maxZ=123810.844;
+ const scale=256/(maxX-minX);
+ const crs=L.extend({},L.CRS.Simple,{transformation:new L.Transformation(scale,-minX*scale,-scale,-minZ*scale)});
+ const bounds=L.latLngBounds([-maxZ,minX],[-minZ,maxX]);
+ fleetMap=L.map('fleetMap',{crs,minZoom:0,maxZoom:8,maxBounds:bounds,maxBoundsViscosity:1,scrollWheelZoom:true}).setView([0,0],1);
+ L.tileLayer('https://map.charlws.com/ets2/promods/tiles/{z}/{x}/{y}.png',{minZoom:0,maxNativeZoom:8,maxZoom:8,bounds,noWrap:true}).addTo(fleetMap);
+}
+function routeLabel(p){
+ return p.dispatchRoute?[p.dispatchRoute.from,p.dispatchRoute.to].join(' → '):'Brak przyjętej trasy';
+}
+function drivingTime(p){
+ if(!p.online||p.speedKmh<3||p.activity==='Gra wstrzymana'||!Number.isFinite(Date.parse(p.activitySince)))return '—';
+ const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(p.activitySince))/60000));
+ return Math.floor(minutes/60)+' h '+minutes%60+' min';
+}
+function markerLabel(p){
+ const moving=p.online&&p.speedKmh>=3&&p.activity!=='Gra wstrzymana';
+ return [p.driver,driverState(p),routeLabel(p),moving?p.speedKmh+' km/h · jedzie od '+drivingTime(p):''].filter(Boolean).join(' · ');
+}
+function updateMap(positions){
+ latestPositions=positions;
+ const selected=mapDriver.value;
+ mapDriver.replaceChildren(new Option('Wybierz kierowcę',''),...positions.map(p=>new Option(p.driver+' · '+driverState(p),p.driver)));
+ mapDriver.value=positions.some(p=>p.driver===selected)?selected:'';
+ const selectedDriver=positions.find(p=>p.driver===mapDriver.value);
+ if(selectedDriver)$('mapStatus').textContent=markerLabel(selectedDriver)+(Number.isFinite(selectedDriver.x)?'':' · Brak pozycji');
+ if(!fleetMap)return;
+ const visible=new Set();
+ for(const p of positions){
+  if(!Number.isFinite(p.x)||!Number.isFinite(p.z)||(p.x===0&&p.z===0))continue;
+  const point=L.latLng(-p.z,p.x);
+  if(!fleetMap.options.maxBounds.contains(point))continue;
+  visible.add(p.driver);
+  const moving=p.online&&p.speedKmh>=3&&p.activity!=='Gra wstrzymana';
+  const style=!p.online?'offline':moving?'moving':'parked';
+  let entry=markers.get(p.driver);
+  if(!entry){
+   const marker=L.marker(point,{icon:driverIcon(style),title:p.driver}).addTo(fleetMap);
+   entry={marker,style,point,frame:0};markers.set(p.driver,entry);
+   marker.bindPopup(document.createElement('div'));
+  }
+  if(entry.style!==style){entry.marker.setIcon(driverIcon(style));entry.style=style}
+  const popup=document.createElement('div');
+  popup.textContent=markerLabel(p);
+  entry.marker.setPopupContent(popup);
+  if(!entry.point.equals(point)){
+   cancelAnimationFrame(entry.frame);
+   const from=entry.marker.getLatLng(),started=performance.now();
+   entry.point=point;
+   const move=now=>{
+    const progress=Math.min(1,(now-started)/900);
+    entry.marker.setLatLng([from.lat+(point.lat-from.lat)*progress,from.lng+(point.lng-from.lng)*progress]);
+    if(progress<1)entry.frame=requestAnimationFrame(move);
+   };
+   entry.frame=requestAnimationFrame(move);
+  }
+ }
+ for(const [name,entry] of markers)if(!visible.has(name)){
+  cancelAnimationFrame(entry.frame);entry.marker.remove();markers.delete(name);
+ }
+}
+function driverIcon(style){
+ return L.divIcon({className:'driver-pin',iconSize:[22,22],html:'<span class="'+style+'"></span>'});
+}
+mapDriver.onchange=()=>{
+ const p=latestPositions.find(row=>row.driver===mapDriver.value);
+ if(fleetMap)$('mapStatus').textContent=p?markerLabel(p)+(markers.has(p.driver)?'':' · Brak pozycji'):'';
+ const entry=p&&markers.get(p.driver);
+ if(entry){fleetMap.setView(entry.point,Math.max(5,fleetMap.getZoom()));entry.marker.openPopup()}
+};
+$('fullscreen').onclick=async()=>{
+ try{
+  if(document.fullscreenElement)await document.exitFullscreen();
+  else await $('mapPanel').requestFullscreen();
+ }catch{$('mapStatus').textContent='Tryb pełnoekranowy jest niedostępny.'}
+};
+document.addEventListener('fullscreenchange',()=>{
+ $('fullscreen').textContent=document.fullscreenElement?'Zamknij pełny ekran':'Pełny ekran';
+ requestAnimationFrame(()=>fleetMap?.invalidateSize());
+});
+initMap();
 async function refresh(){
  try{
   const response=await fetch('/api/fleet/positions',{cache:'no-store'});
   if(!response.ok)throw Error(response.status===403?'Brak dostępu do Centrum floty.':'Nie udało się pobrać statusów.');
   const {positions}=await response.json();
+  updateMap(positions);
   $('state').textContent=positions.length?'Aktywni: '+positions.filter(p=>p.online).length+' / '+positions.length:'Brak kierowców do wyświetlenia.';
   $('rows').innerHTML=positions.map(p=>{
    const route=p.dispatchRoute?[p.dispatchRoute.from,p.dispatchRoute.to].join(' → '):'—';
@@ -25,8 +128,8 @@ async function refresh(){
    const speed=p.online&&p.activity!=='Gra wstrzymana'&&p.speedKmh>=3?p.speedKmh+' km/h':'—';
    return '<tr>'+[p.driver,driverState(p),locationLabel(p),cargo,speed,route,delivery].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>';
   }).join('');
- }catch(error){$('rows').replaceChildren();$('state').textContent=error.message}
+ }catch(error){$('state').textContent=error.message}
 }
-refresh();
-setInterval(refresh,15000);
+async function poll(){await refresh();setTimeout(poll,4000)}
+poll();
 </script></html>
