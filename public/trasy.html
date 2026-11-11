@@ -13,7 +13,7 @@ const $=id=>document.getElementById(id);let routes=[];function val(id){return $(
  if(!confirm('Usunąć trasę z listy zleceń?'))return;
  try{await api('/api/routes/archive','POST',{id});await refresh();msg('Trasa usunięta z listy.')}catch(e){msg(e.message)}
 }
-async function exportJob(id){try{const response=await fetch('/api/routes/export?id='+encodeURIComponent(id),{credentials:'same-origin'});if(!response.ok)throw Error('Nie udało się wyeksportować zlecenia');const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='ks-job-'+id+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);msg('Zlecenie pobrane jako JSON. To manifest, a nie automatycznie wygenerowany kurs ETS2.')}catch(e){msg(e.message)}}async function addRoute(){try{const cargo=val('cargoPicker')==='__manual__'?val('cargo'):val('cargoPicker');if(!cargo)throw Error($('cargoPicker').disabled?'Brak pasujących ładunków. Zmień firmę lub typ naczepy.':'Wybierz ładunek.');const compatible=destinationCompatibility(val('destinationCompany'),cargo);if(!val('destinationCompany'))throw Error('Wybierz firmę rozładunku.');await api('/api/routes','POST',{driver:val('driverName'),catalogProfile:val('catalogProfile'),fromCountry:val('fromCountry'),from:val('from'),toCountry:val('toCountry'),to:val('to'),sourceCompany:val('sourceCompany'),destinationCompany:val('destinationCompany'),trailerType:val('trailerType'),cargo,cargoTons:Number(val('cargoTons')),plannedKm:Number(val('plannedKm')),freight:Number(val('freight'))});msg('Trasa zapisana w bazie.');await refresh()}catch(e){msg(e.message)}}async function progress(id){try{await api('/api/routes/progress','POST',{id,drivenKm:Number(val('km_'+id)),status:val('status_'+id)});msg('Przebieg zaktualizowany.');await refresh()}catch(e){msg(e.message)}}async function addExpense(){try{await api('/api/expenses','POST',{routeId:val('routeId'),type:val('type'),country:val('country'),from:val('expenseFrom'),to:val('expenseTo'),place:val('place'),liters:Number(val('liters')),amount:Number(val('amount'))});msg('Koszt zapisany w bazie.');await refresh()}catch(e){msg(e.message)}}function normalizeLocation(value){
+async function exportJob(id){try{const response=await fetch('/api/routes/export?id='+encodeURIComponent(id),{credentials:'same-origin'});if(!response.ok)throw Error('Nie udało się wyeksportować zlecenia');const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='ks-job-'+id+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);msg('Zlecenie pobrane jako JSON. To manifest, a nie automatycznie wygenerowany kurs ETS2.')}catch(e){msg(e.message)}}async function addRoute(){try{const cargo=val('cargoPicker')==='__manual__'?val('cargo'):val('cargoPicker');if(!cargo)throw Error($('cargoPicker').disabled?'Brak pasujących ładunków. Zmień firmę lub typ naczepy.':'Wybierz ładunek.');const compatible=destinationCompatibility(val('destinationCompany'),cargo);if(!val('destinationCompany')||compatible!==true)throw Error('Wybierz firmę, która przyjmuje ten ładunek według katalogu ETS2.');await api('/api/routes','POST',{driver:val('driverName'),catalogProfile:val('catalogProfile'),fromCountry:val('fromCountry'),from:val('from'),toCountry:val('toCountry'),to:val('to'),sourceCompany:val('sourceCompany'),destinationCompany:val('destinationCompany'),trailerType:val('trailerType'),cargo,cargoTons:Number(val('cargoTons')),plannedKm:Number(val('plannedKm')),freight:Number(val('freight'))});msg('Trasa zapisana w bazie.');await refresh()}catch(e){msg(e.message)}}async function progress(id){try{await api('/api/routes/progress','POST',{id,drivenKm:Number(val('km_'+id)),status:val('status_'+id)});msg('Przebieg zaktualizowany.');await refresh()}catch(e){msg(e.message)}}async function addExpense(){try{await api('/api/expenses','POST',{routeId:val('routeId'),type:val('type'),country:val('country'),from:val('expenseFrom'),to:val('expenseTo'),place:val('place'),liters:Number(val('liters')),amount:Number(val('amount'))});msg('Koszt zapisany w bazie.');await refresh()}catch(e){msg(e.message)}}function normalizeLocation(value){
  return String(value??'').trim().toLocaleLowerCase('pl').normalize('NFD').replace(/\p{Diacritic}/gu,'').replace(/ł/g,'l');
 }
 let catalog=null,profileDepots=[],mapSetDepots=[];
@@ -137,9 +137,11 @@ function updateCitySuggestions(){
   const available=Object.entries(cities).filter(([,data])=>countryMatches(val(field),data[1]));
   const ids=new Set(available.map(([id])=>id));
   const names=[...new Set([...available.map(([,data])=>data[0]),...Object.entries(polishNames.cities).filter(([,id])=>ids.has(id)).map(([name])=>name)])];
-  $(list).replaceChildren(...names.sort((a,b)=>a.localeCompare(b,'pl')).map(name=>new Option(name,name)));
+  const term=normalizeLocation(val(field==='fromCountry'?'from':'to'));
+  $(list).replaceChildren(...names.filter(name=>!term||normalizeLocation(name).includes(term)).sort((a,b)=>a.localeCompare(b,'pl')).map(name=>new Option(name,name)));
  }
 }
+for(const id of ['from','to'])$(id).addEventListener('input',updateCitySuggestions);
 function updateCatalog(){
  const {cities}=activeCatalog();
  const countries=[...new Set(Object.values(cities).map(([,country])=>countryLabel(country)).filter(Boolean))];
@@ -187,14 +189,14 @@ function updateCompanySuggestions(){
    for(const [,company] of availableDepots)names.set(normalizeLocation(company),company);
   }
   const options=[...names.values()].filter(name=>{
-   if(cityField==='to')return Boolean(cargo);
+   if(cityField==='to')return Boolean(cargo)&&destinationCompatibility(name,cargo)===true;
    return true;
   }).sort((x,y)=>x.localeCompare(y,'pl'));
   select.replaceChildren(new Option(placeholder,''),...options.map(name=>new Option(name,name)));
   if(options.includes(previous))select.value=previous;
   if(cityField==='from'&&select.value!==previous)updateCargoSuggestions();
  }
- $('destinationHint').textContent='Lista firm w mieście; zgodność kursu z ETS2 nie jest gwarantowana.';
+ $('destinationHint').textContent=!cargo?'Najpierw wybierz ładunek.':$('destinationCompany').options.length===1?'W tym mieście nie znaleziono firmy przyjmującej ten towar.':'Firmy z katalogu przyjmujące wybrany towar; nie gwarantuje to dostępności oferty w grze.';
 }
 for(const field of ['from','to'])$(field).addEventListener('input',updateCompanySuggestions);
 for(const field of ['fromCountry','toCountry'])$(field).addEventListener('input',()=>{updateCitySuggestions();updateCompanySuggestions()});
