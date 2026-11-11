@@ -32,10 +32,17 @@ function activeCatalog(){
 let polishNames={cities:{},cargo:{}},cargoTypes=null;
 let companyCargo={};
 const rybackieElkRules={ikea_pl:[],ikea_dist_pl:[],biedronka:['fresh_fish'],biedronka_in:['fresh_fish']};
+// Supplementary retail depot rules for company names absent from the base ETS2 definitions.
+const retailCargoIds=['fresh_fish','frozen_hake','salm_fillet','beef_meat','chicken_meat','pork_meat','milk','cheese','yogurt','icecream','apples','oranges','tomatoes','potatoes','packag_food','beverages','bottle_water','canned_tuna','canned_beef','canned_pork','pasta','rice','flour','chocolate','sugar'];
+const retailCompanies=new Set(['biedronka','biedronka_in','lidl','lidl_centrum','dino','netto','aldi','aldn','alds','auchan','carrefour','tesco','rewe','leclerc','makro','kaufland','intermarche']);
+function cargoDefinitionFor(name){
+ const key=normalizeLocation(name);
+ return companyCargo[key]|| (retailCompanies.has(key)?{in:retailCargoIds,out:retailCargoIds}:null);
+}
 const cargoPicker=$('cargoPicker');
 function companyDefinition(name){
  const key=normalizeLocation(name);
- return Object.hasOwn(companyCargo,key)?companyCargo[key]:null;
+ return cargoDefinitionFor(key);
 }
 function availableForTrailer(id){
  const type=val('trailerType');
