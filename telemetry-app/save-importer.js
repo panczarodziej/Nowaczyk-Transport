@@ -68,7 +68,11 @@ function plan(text,job,ramps){
   const trailer=list.find(unit=>unit.type==='trailer'&&unit.id===ref);
   const definition=definitions.get(trailer&&field(trailer,'trailer_definition'));
   const body=definition&&field(definition,'body_type');
-  const attached=vehicles?ref&&ref!=='null':field(player,'my_trailer_attached')==='true'&&field(player,'my_trailer')===ref;
+  // ETS2 1.57 can persist false connection flags even when the player's
+  // assigned trailer and owned trailer refer to the same live trailer unit.
+  // Require both references to match; never accept an arbitrary assigned trailer.
+  const attached=vehicles?Boolean(ref&&ref!=='null'):
+   Boolean(ref&&ref!=='null'&&field(player,'my_trailer')===ref);
   if(!trailer||!attached)throw Error('W wybranym zapisie nie ma aktywnej własnej naczepy. Podepnij ją, wykonaj ręczny zapis i wskaż jego game.sii.');
   if(field(trailer,'slave_trailer')!=='null')throw Error('Tryb własnej naczepy obsługuje pojedynczą naczepę.');
   const ownType=Object.values(allowedTypes).find(([type])=>type===body);
