@@ -85,7 +85,23 @@ function plan(text,job,ramps){
   return body?body===expected[0]:expected[1].test((definition&&field(definition,'source_name'))||ref);
  });
  const cargoId=offer=>field(offer,'cargo')?.replace(/^cargo\./,'');
- const slot=options.find(offer=>norm(cargoId(offer))===norm(cargo.id||cargo.name));
+ let slot=options.find(offer=>norm(cargoId(offer))===norm(cargo.id||cargo.name));
+// For an owned-trailer job we construct player_job directly, so a valid
+// cargo/trailer template may come from another company in the same save.
+// The source company must still exist and both loading/delivery points are validated.
+if(!slot&&ramps){
+ const matches=list.filter(offer=>{
+  if(offer.type!=='job_offer_data'||!field(offer,'units_count'))return false;
+  if(norm(cargoId(offer))!==norm(cargo.id||cargo.name))return false;
+  const ref=field(offer,'trailer_definition');
+  if(!ref)return false;
+  if(!expected)return true;
+  const definition=definitions.get(ref);
+  const body=definition&&field(definition,'body_type');
+  return body?body===expected[0]:expected[1].test((definition&&field(definition,'source_name'))||ref);
+ });
+ slot=matches[0];
+}
  if(!slot){
   const available=[...new Set(options.map(cargoId).filter(Boolean))].sort();
   const type=job.trailerType==='firanka'?'plandeka':job.trailerType==='chlodnia'?'chłodnia':'dowolny';
