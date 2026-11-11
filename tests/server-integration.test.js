@@ -113,6 +113,15 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(updatedSummary.data.km,914.8);
  assert.equal(updatedSummary.data.deliveries,2);
  const me=await req('/api/telemetry/me',null,login.cookie);assert.equal(me.data.position.cargoMassKg,18000);assert.equal(me.data.events.length,4);assert.equal((await req('/api/fleet/positions',null,login.cookie)).status,403);
+ const payment={driver:'Driver1',month:'2026-11',bonus:150,deduction:0};
+ assert.equal((await req('/api/economy/payment',{...payment,driver:'unknown-driver'},admin.cookie)).status,404);
+ assert.equal((await req('/api/economy/payment',payment,login.cookie)).status,403);
+ assert.equal((await req('/api/economy/payment',payment,admin.cookie)).data.amount,150);
+ assert.equal((await req('/api/economy/payment',payment,admin.cookie)).status,409);
+ const driverEconomy=await req('/api/economy?mine=1',null,login.cookie);
+ assert.deepEqual(driverEconomy.data.wallets,{driver1:150});
+ assert.equal(driverEconomy.data.payments[0].bonus,150);
+ assert.deepEqual((await req('/api/economy?mine=1',null,admin.cookie)).data.payments,[]);
  // Parallel writes must not overwrite each other in the single-process store.
  const writes=await Promise.all(Array.from({length:6},(_,i)=>req('/api/routes',{...route,to:'City'+i},admin.cookie)));assert.ok(writes.every(x=>x.status===201));assert.equal((await req('/api/routes',null,admin.cookie)).data.length,9);
  assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},login.cookie)).status,403);

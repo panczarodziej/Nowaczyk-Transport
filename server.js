@@ -268,7 +268,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  // Ekonomia wirtualna: wypłaty ręczne, portfel i sklep z zatwierdzaniem.
  if(u.pathname==='/api/economy'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
-  const admin=auth(req),name=me.username.toLowerCase();
+  const admin=auth(req)&&u.searchParams.get('mine')!=='1',name=me.username.toLowerCase();
   const wallets=db.wallets||{},orders=db.shopOrders||[],payments=db.payments||[],rates=db.driverRates||{};
   return send(res,200,{wallets:admin?wallets:{[name]:wallets[name]||0},orders:admin?orders:orders.filter(x=>x.driver===name),payments:admin?payments:payments.filter(x=>x.driver===name),rates:admin?rates:{[name]:rates[name]??0.7},items:db.shopItems||[],earnings:(db.routes||[]).filter(r=>r.settledAt&&(admin||r.driver.toLowerCase()===name)).map(r=>({id:r.id,driver:r.driver,km:r.drivenKm,rate:r.payRate??0.7,earned:Math.round(r.drivenKm*(r.payRate??0.7)*100)/100,settledAt:r.settledAt}))});
  }
@@ -282,6 +282,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),driver=str(a.driver,50).toLowerCase(),month=str(a.month,7),bonus=Number(a.bonus||0),deduction=Number(a.deduction||0);
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||!driver||![bonus,deduction].every(v=>Number.isFinite(v)&&v>=0&&v<=1000000))return send(res,400,{error:'Nieprawidłowe dane wypłaty'});
+  if(!accounts.has(driver))return send(res,404,{error:'Nie znaleziono konta z tym loginem'});
   db.payments??=[];if(db.payments.some(x=>x.driver===driver&&x.month===month))return send(res,409,{error:'Ten miesiąc został już rozliczony'});
   const rows=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.settledAt&&r.settledAt.slice(0,7)===month);
   const base=rows.reduce((sum,r)=>sum+Math.round(r.drivenKm*(r.payRate??0.7)*100),0)/100;
