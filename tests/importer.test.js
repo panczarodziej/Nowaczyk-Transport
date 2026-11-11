@@ -100,3 +100,40 @@ trailer_def : trailer_def.scs.box {
  assert.match(plan(legacy,ownedJob,{source:point}).text,/is_cargo_market_job: true/);
  assert.throws(()=>plan(fixture.replace(' trailer: _trailer',' trailer: null'),ownedJob,{source:point}),/nie ma aktywnej/);
 });
+
+test('owned trailer accepts matching cargo template from another company',()=>{
+ const fixture=text.replace(/\n}\s*$/, `
+company : company.volatile.transinet.warszawa {
+ job_offer: 1
+ job_offer[0]: _tomato
+}
+job_offer_data : _tomato {
+ target: "transinet.krakow"
+ expiration_time: 2000
+ shortest_distance_km: 300
+ cargo: cargo.tomatoes
+ trailer_definition: trailer_def.scs.box.single_3.reefer
+ units_count: 24
+}
+player : _player {
+ current_job: null
+ selected_job: null
+ assigned_vehicles: _vehicles
+}
+player_vehicles : _vehicles {
+ vehicle: _truck
+ trailer: _trailer
+}
+trailer : _trailer {
+ trailer_definition: _owned
+ slave_trailer: null
+}
+trailer_def : _owned {
+ body_type: refrigerated
+}
+`);
+ const point='(1, 2, 3)(1; 0, 0, 0)';
+ const route={...job,cargo:{name:'tomatoes'},trailerType:'chlodnia',to:{...job.to,deliveryPlacements:{easy:[point]}}};
+ assert.match(plan(fixture,route,{source:point}).text,/cargo: cargo.tomatoes/);
+ assert.throws(()=>plan(fixture,route),/brak zgodnego szablonu/);
+});
