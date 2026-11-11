@@ -534,7 +534,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(typeof a.active==='boolean')acct.active=a.active;
   if(a.password!==undefined)Object.assign(acct,passwordHash(a.password));
   if(a.role!==undefined&&ROLES.includes(a.role)&&acct.role!=='admin')acct.role=a.role;
-  if(!acct.active)revokeAccountSessions(acct.id);
+  if(!acct.active||a.password!==undefined)revokeAccountSessions(acct.id);
   db.accounts=[...accounts.values()];await save(db);return send(res,200,safeAccount(acct));
  }
  if(u.pathname==='/api/accounts/delete'&&method==='POST'){
