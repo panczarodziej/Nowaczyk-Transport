@@ -381,7 +381,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/routes'&&method==='GET'){
   if(!who(req))return send(res,401,{error:'Zaloguj się'});
-  const me=who(req);return send(res,200,canDispatch(req)?(db.routes||[]):(db.routes||[]).filter(r=>r.driver.toLowerCase()===me.username.toLowerCase()&&r.companyId===me.companyId));
+  const me=who(req);return send(res,200,canDispatch(req)&&u.searchParams.get('mine')!=='1'?(db.routes||[]):(db.routes||[]).filter(r=>r.driver.toLowerCase()===me.username.toLowerCase()&&r.companyId===me.companyId));
  }
  if(u.pathname==='/api/routes'&&method==='POST'){
   if(!who(req))return send(res,401,{error:'Sesja wygasła. Zaloguj się ponownie, aby zapisać trasę.'});
@@ -434,7 +434,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/expenses'&&method==='GET'){
   if(!who(req))return send(res,401,{error:'Zaloguj się'});
-  const me=who(req);return send(res,200,canDispatch(req)?(db.expenses||[]):(db.expenses||[]).filter(e=>e.driver.toLowerCase()===me.username.toLowerCase()));
+  const me=who(req);return send(res,200,canDispatch(req)&&u.searchParams.get('mine')!=='1'?(db.expenses||[]):(db.expenses||[]).filter(e=>e.driver.toLowerCase()===me.username.toLowerCase()));
  }
  if(u.pathname==='/api/expenses'&&method==='POST'){
   if(!who(req))return send(res,401,{error:'Zaloguj się'});
@@ -460,7 +460,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/fleet'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const fleet=db.fleet||[];
-  if(auth(req))return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
+  if(auth(req)&&u.searchParams.get('mine')!=='1')return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{fleet:fleet.filter(v=>v.driverAccountId===me.id&&v.companyId===me.companyId)});
  }
  if(u.pathname==='/api/fleet'&&method==='POST'){

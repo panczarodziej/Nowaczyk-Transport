@@ -1,6 +1,6 @@
 {
   "name": "nowaczyk-transport-telemetry",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "private": true,
   "description": "Nowaczyk Transport — panel kierowcy i telemetria",
   "main": "main.js",
@@ -9,6 +9,7 @@
     "build:win": "electron-builder --win nsis"
   },
   "dependencies": {
+    "electron-updater": "6.8.11",
     "ws": "^8.22.2"
   },
   "devDependencies": {
@@ -48,6 +49,10 @@
         "to": "rencloud-reader.ps1"
       }
     ],
+    "publish": {
+      "provider": "generic",
+      "url": "https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download"
+    },
     "artifactName": "Nowaczyk-Transport-Setup-${version}.${ext}"
   }
 }

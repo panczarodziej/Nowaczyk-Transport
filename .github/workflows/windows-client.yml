@@ -31,14 +31,17 @@ jobs:
           node-version: '22'
       - run: npm ci
         working-directory: telemetry-app
-      - run: npm run build:win
+      - run: npm run build:win -- --publish never
         working-directory: telemetry-app
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v4
         with:
           name: Nowaczyk-Transport-Instalator
-          path: telemetry-app/dist/Nowaczyk-Transport-Setup-*.exe
+          path: |
+            telemetry-app/dist/Nowaczyk-Transport-Setup-*.exe
+            telemetry-app/dist/Nowaczyk-Transport-Setup-*.exe.blockmap
+            telemetry-app/dist/latest.yml
           if-no-files-found: error
 
   release:
@@ -64,8 +67,9 @@ jobs:
             exit 1
           fi
           cp "${installer[0]}" Nowaczyk-Transport-Setup.exe
+          assets=(Nowaczyk-Transport-Setup.exe "${installer[0]}" "${installer[0]}.blockmap" latest.yml)
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" Nowaczyk-Transport-Setup.exe --clobber
+            gh release upload "$tag" "${assets[@]}" --clobber
           else
-            gh release create "$tag" Nowaczyk-Transport-Setup.exe --target "$GITHUB_SHA" --latest --title "$tag" --generate-notes
+            gh release create "$tag" "${assets[@]}" --target "$GITHUB_SHA" --latest --title "$tag" --generate-notes
           fi

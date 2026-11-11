@@ -95,7 +95,7 @@ async function syncTelemetryInner(){
 function create(){const s=settings();win=new BrowserWindow({width:680,height:650,minWidth:560,minHeight:500,show:false,icon:path.join(__dirname,'icon.png'),webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false}});win.loadFile('ui.html');win.once('ready-to-show',()=>{if(!((process.argv.includes('--minimized')||s.startMinimized)&&app.getLoginItemSettings().wasOpenedAtLogin))win.show()});win.on('close',e=>{if(!app.isQuitting){e.preventDefault();win.hide()}});
  // Ikona zasobnika generowana w kodzie, bez pobierania z internetu.
  const icon=nativeImage.createFromPath(path.join(__dirname,'icon.png'));tray=new Tray(icon);tray.setToolTip('Nowaczyk Transport Telemetry');tray.setContextMenu(Menu.buildFromTemplate([{label:'Pokaż ustawienia',click:()=>win.show()},{label:'Zakończ',click:()=>{app.isQuitting=true;app.quit()}}]));tray.on('double-click',()=>win.show());}
-async function listDriverRoutes(){const origin=baseUrl();const cookies=await driverSession().cookies.get({url:origin});const c=cookies.find(x=>x.name==='ks_session');if(!c)return {ok:false,error:'Zaloguj się w panelu kierowcy'};const r=await fetch(origin+'/api/routes',{headers:{Cookie:'ks_session='+c.value},signal:AbortSignal.timeout(9000)});if(r.status===401)return {ok:false,error:'Sesja wygasła. Zaloguj się ponownie formularzem w aplikacji, a potem pobierz zlecenia.'};if(!r.ok)return {ok:false,error:'Nie udało się pobrać zleceń: HTTP '+r.status};const data=await r.json();return {ok:true,routes:Array.isArray(data)?data:[]}}
+async function listDriverRoutes(){const origin=baseUrl();const cookies=await driverSession().cookies.get({url:origin});const c=cookies.find(x=>x.name==='ks_session');if(!c)return {ok:false,error:'Zaloguj się w panelu kierowcy'};const r=await fetch(origin+'/api/routes?mine=1',{headers:{Cookie:'ks_session='+c.value},signal:AbortSignal.timeout(9000)});if(r.status===401)return {ok:false,error:'Sesja wygasła. Zaloguj się ponownie formularzem w aplikacji, a potem pobierz zlecenia.'};if(!r.ok)return {ok:false,error:'Nie udało się pobrać zleceń: HTTP '+r.status};const data=await r.json();return {ok:true,routes:Array.isArray(data)?data:[]}}
 const autoDispatchFile=()=>path.join(app.getPath('userData'),'auto-dispatch.json');
 let autoDispatchBusy=false;
 let autoDispatchMessage='';
@@ -147,6 +147,14 @@ async function autoDispatch(){
  }catch(error){autoDispatchMessage=error.message}
  finally{autoDispatchBusy=false}
 }
+function startUpdates(){
+ if(!app.isPackaged||process.platform!=='win32')return;
+ const {autoUpdater}=require('electron-updater');
+ autoUpdater.on('error',error=>console.error('Aktualizacja:',error.message));
+ const check=()=>autoUpdater.checkForUpdates().catch(error=>console.error('Sprawdzanie aktualizacji:',error.message));
+ check();
+ setInterval(check,6*60*60*1000).unref();
+}
 app.whenReady().then(()=>{
  ipcMain.handle('auto-dispatch-status',()=>({enabled:!!autoDispatchSettings().savePath,message:autoDispatchMessage}));
  ipcMain.handle('auto-dispatch-configure',async()=>{
@@ -168,4 +176,4 @@ app.whenReady().then(()=>{
  if(process.platform!=='win32'||!saved.etsPath||pluginStatus(saved.etsPath).installed)return saved;
  try{await installPlugin(saved.etsPath);return {...saved,pluginMessage:'Plugin ETS2 zainstalowany.'}}
  catch(e){return {...saved,pluginMessage:e.message}}
-});ipcMain.handle('choose-ets',async()=>{const r=await dialog.showOpenDialog(win,{title:'Wybierz folder Euro Truck Simulator 2',properties:['openDirectory']});return r.canceled?'':r.filePaths[0]});ipcMain.handle('minimize',()=>win.hide());ipcMain.handle('detect-ets',()=>detectEts());ipcMain.handle('game-status',()=>gameStatus());ipcMain.handle('server-status',(_,url)=>serverStatus(url));create()});app.on('before-quit',()=>{readerProcess?.kill();bridgeServer?.close()});app.on('window-all-closed',()=>{});
+});ipcMain.handle('choose-ets',async()=>{const r=await dialog.showOpenDialog(win,{title:'Wybierz folder Euro Truck Simulator 2',properties:['openDirectory']});return r.canceled?'':r.filePaths[0]});ipcMain.handle('minimize',()=>win.hide());ipcMain.handle('detect-ets',()=>detectEts());ipcMain.handle('game-status',()=>gameStatus());ipcMain.handle('server-status',(_,url)=>serverStatus(url));create();startUpdates()});app.on('before-quit',()=>{app.isQuitting=true;readerProcess?.kill();bridgeServer?.close()});app.on('window-all-closed',()=>{});
