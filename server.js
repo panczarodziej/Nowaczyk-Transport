@@ -297,15 +297,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/economy/payment'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
-  const a=await body(req),driver=str(a.driver,50).toLowerCase(),month=str(a.month,7),bonus=Number(a.bonus||0),deduction=Number(a.deduction||0);
-  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||!driver||![bonus,deduction].every(v=>Number.isFinite(v)&&v>=0&&v<=1000000))return send(res,400,{error:'Nieprawidłowe dane wypłaty'});
+  const a=await body(req),driver=str(a.driver,50).toLowerCase(),month=str(a.month,7),bonus=Number(a.bonus||0),deduction=Number(a.deduction||0),manualAmount=a.amount===undefined||a.amount===null||a.amount===''?null:Number(a.amount);
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||!driver||![bonus,deduction].every(v=>Number.isFinite(v)&&v>=0&&v<=1000000)||(manualAmount!==null&&(!Number.isFinite(manualAmount)||manualAmount<0||manualAmount>1000000)))return send(res,400,{error:'Nieprawidłowe dane wypłaty'});
   if(!accounts.has(driver))return send(res,404,{error:'Nie znaleziono konta z tym loginem'});
   db.payments??=[];if(db.payments.some(x=>x.driver===driver&&x.month===month))return send(res,409,{error:'Ten miesiąc został już rozliczony'});
   const rows=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.settledAt&&r.settledAt.slice(0,7)===month);
   const base=rows.reduce((sum,r)=>sum+Math.round(r.drivenKm*(r.payRate??0.7)*100),0)/100;
-  const amount=Math.round((base+bonus-deduction)*100)/100;if(amount<0)return send(res,400,{error:'Potrącenia przekraczają wynagrodzenie'});
+  const amount=roundPLN((manualAmount===null?base:manualAmount)+bonus-deduction);if(amount<0)return send(res,400,{error:'Potrącenia przekraczają wynagrodzenie'});
   db.wallets??={};db.wallets[driver]=Math.round(((db.wallets[driver]||0)+amount)*100)/100;
-  db.payments.push({id:crypto.randomUUID(),driver,month,base,bonus,deduction,amount,createdAt:new Date().toISOString()});
+  db.payments.push({id:crypto.randomUUID(),driver,month,base:manualAmount===null?base:manualAmount,calculatedBase:base,bonus,deduction,amount,createdAt:new Date().toISOString()});
   db.ledger??=[];db.ledger.push({id:crypto.randomUUID(),companyId:MAIN_COMPANY_ID,type:'wyplata',amount:-amount,createdAt:new Date().toISOString()});
   await save(db);return send(res,201,{ok:true,amount});
  }
