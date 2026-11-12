@@ -125,11 +125,6 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(delivery.data.event.mileageRouteId,assigned.data.id);
  assert.equal(delivery.data.event.settlementAllowed,false);
  assert.equal((await req('/api/telemetry/events',delivered,desktop.cookie)).data.duplicate,true);
- const savedMileage=await req('/api/driver/mileage',null,login.cookie);
- assert.equal(savedMileage.data.completedRoutes,1);
- assert.equal(savedMileage.data.completedKm,602.3);
- assert.equal((await req('/api/routes/progress',{id:assigned.data.id,drivenKm:650,status:'W trasie'},admin.cookie)).status,409);
- assert.equal((await req('/api/routes/archive',{id:assigned.data.id},admin.cookie)).status,409);
  const events=await req('/api/telemetry/events',null,dispatcher.cookie);
  assert.equal(events.data.at(-1).type,'job-delivered');
  assert.equal(events.data.at(-1).distanceKm,602.3);

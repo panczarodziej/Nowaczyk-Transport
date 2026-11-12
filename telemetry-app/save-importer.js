@@ -49,8 +49,6 @@ function loadingPoint(side){
  return side.loadingPlacement;
 }
 function plan(text,job,ramps){
- const nativeMarket=ramps?.market===true;
- if(nativeMarket)ramps=null;
  const list=units(text),source=job.from||{},dest=job.to||{},cargo=job.cargo||{};
  if(!source.company||!source.city||!dest.company||!dest.city||!cargo.name)throw Error('Dyspozytor musi podać obie firmy, oba miasta i towar.');
  const companies=list.filter(u=>u.type==='company'&&u.id.startsWith('company.volatile.'));
@@ -62,7 +60,6 @@ function plan(text,job,ramps){
  const allowedTypes={firanka:['curtainside',/(?:^|\.)curtain(?:_|$)/i],chlodnia:['refrigerated',/(?:^|\.)reefer(?:_|$)/i]};
  let expected=Object.hasOwn(allowedTypes,job.trailerType)?allowedTypes[job.trailerType]:null;
  const player=list.find(unit=>unit.type==='player');
- if(nativeMarket&&(!player||field(player,'current_job')!=='null'||field(player,'selected_job')!=='null'))throw Error('Użyj ręcznego zapisu sprzed importu, bez aktywnego zlecenia.');
  if(ramps){
   if(!player||field(player,'current_job')!=='null'||field(player,'selected_job')!=='null')throw Error('Zakończ aktywne zlecenie i usuń wybraną ofertę przed importem.');
   const vehiclesRef=field(player,'assigned_vehicles');
@@ -96,9 +93,9 @@ function plan(text,job,ramps){
 // For an owned-trailer job we construct player_job directly, so a valid
 // cargo/trailer template may come from another company in the same save.
 // The source company must still exist and both loading/delivery points are validated.
-if(!slot&&(ramps||nativeMarket)){
+if(!slot&&ramps){
  const matches=list.filter(offer=>{
-  if(offer.type!=='job_offer_data'||Number(field(offer,'units_count'))<=0)return false;
+  if(offer.type!=='job_offer_data'||!field(offer,'units_count'))return false;
   if(norm(cargoId(offer))!==norm(cargo.id||cargo.name))return false;
   const ref=field(offer,'trailer_definition');
   if(!ref)return false;
@@ -124,29 +121,16 @@ if(!slot&&(ramps||nativeMarket)){
   const [medium,hard]=['medium','hard'].map(type=>validPlacement(points[type]?.[0])?points[type][0]:target);
   const numbers={units_count:Number(field(slot,'units_count')),ferry_time:Number(field(slot,'ferry_time')||0),ferry_price:Number(field(slot,'ferry_price')||0),urgency:Number(field(slot,'urgency')||0)};
   if(Object.values(numbers).some(n=>!Number.isSafeInteger(n)||n<0)||!numbers.units_count)throw Error('Nieprawidłowe dane wzorcowej oferty ETS2.');
-  // ETS2 records the accepted cargo-market offer seed as cargo_model_index.
-  const offerSeeds=[...from.text.matchAll(/^ *cargo_offer_seeds\[\d+\]: *([0-9]+) *\r?$/gm)]
-   .map(match=>Number(match[1]));
-  const cargoModelIndex=offerSeeds.find(seed=>Number.isSafeInteger(seed)&&seed>clock&&seed<=0x7fffffff);
-  if(cargoModelIndex===undefined)throw Error('Firma załadunku nie ma aktualnych ofert rynku ładunków. Odśwież ręczny zapis ETS2 i spróbuj ponownie.');
   const id='_nameless.aaa.'+crypto.randomBytes(2).toString('hex')+'.'+crypto.randomBytes(2).toString('hex');
   if(list.some(unit=>unit.id===id))throw Error('Konflikt identyfikatora zlecenia. Spróbuj ponownie.');
-  const properties={company_truck:'null',company_trailer:'null',target_placement:target,target_placement_medium:medium,target_placement_hard:hard,target_placement_rigid:'(0, &60ad78ec, 0) (1; 0, 0, 0)',source_placement:sourcePlacement,selected_target:'nil',time_lower_limit:clock+6000,time_upper_limit:clock+8000,job_distance:0,fuel_consumed:0,last_reported_fuel:0,total_fines:0,is_trailer_loaded:'false',online_job_id:'nil',online_job_trailer_model:'null',autoload_used:'false',cargo:field(slot,'cargo'),source_company:from.id,target_company:to.id,cargo_model_index:cargoModelIndex,is_articulated:'false',is_cargo_market_job:'true',start_time:clock,planned_distance_km:km,special:'null',fill_ratio:1,...numbers};
+  const properties={company_truck:'null',company_trailer:'null',target_placement:target,target_placement_medium:medium,target_placement_hard:hard,target_placement_rigid:'(0, &60ad78ec, 0) (1; 0, 0, 0)',source_placement:sourcePlacement,selected_target:'nil',time_lower_limit:clock+6000,time_upper_limit:clock+8000,job_distance:0,fuel_consumed:0,last_reported_fuel:0,total_fines:0,is_trailer_loaded:'false',online_job_id:'nil',online_job_trailer_model:'null',autoload_used:'false',cargo:field(slot,'cargo'),source_company:from.id,target_company:to.id,is_articulated:'false',is_cargo_market_job:'true',start_time:clock,planned_distance_km:km,special:'null',fill_ratio:1,...numbers};
   const changed=text.slice(0,player.start)+replaceField(player.text,'current_job',id)+text.slice(player.end);
   const end=changed.lastIndexOf('}');
   const jobUnit='\nplayer_job : '+id+' {\n'+Object.entries(properties).map(([key,value])=>' '+key+': '+value).join('\n')+'\n}\n';
   return {text:changed.slice(0,end)+jobUnit+changed.slice(end),notice:'Aktywne zlecenie zapisane. Wczytaj zmieniony zapis w ETS2 i sprawdź punkt załadunku.'};
  }
- const sourceSlot=nativeMarket&&!refs.has(slot.id)
-  ? list.find(offer=>offer.type==='job_offer_data'&&refs.has(offer.id)&&field(offer,'cargo')==='null'&&field(offer,'units_count')==='0')
-  : slot;
- if(!sourceSlot)throw Error('Firma załadunku nie ma wolnego miejsca na ofertę. Odśwież rynek i użyj nowego ręcznego zapisu.');
  const target=to.id.slice(17);let replacement=replaceField(slot.text,'target',JSON.stringify(target));replacement=replaceField(replacement,'expiration_time',clock+7*24*60);replacement=replaceField(replacement,'shortest_distance_km',km);
- if(sourceSlot!==slot){
-  replacement=replacement.replace(slot.id,sourceSlot.id);
-  replacement=replaceField(replacement,'trailer_place',field(sourceSlot,'trailer_place')||'0');
- }
- return {text:text.slice(0,sourceSlot.start)+replacement+text.slice(sourceSlot.end),offerId:sourceSlot.id,source:from.id,target:to.id,unitsCount:Number(field(slot,'units_count')),notice:nativeMarket?'Wczytaj zapis i przyjmij trasę na Rynku przesyłek ETS2, w firmie załadunku. Do odbioru użyj naczepy z oferty gry.':'Oferta zapisana. Wczytaj zmieniony zapis w ETS2 i odbierz ładunek w firmie. Masa wynika z definicji towaru i zachowanej liczby jednostek; system porówna ją z tonami zlecenia.'};
+ return {text:text.slice(0,slot.start)+replacement+text.slice(slot.end),offerId:slot.id,source:from.id,target:to.id,unitsCount:Number(field(slot,'units_count')),notice:'Oferta zapisana. Wczytaj zmieniony zapis w ETS2 i odbierz ładunek w firmie. Masa wynika z definicji towaru i zachowanej liczby jednostek; system porówna ją z tonami zlecenia.'};
 }
 function importFile(file,job,ramps){
  if(path.basename(file).toLowerCase()!=='game.sii')throw Error('Wybierz plik game.sii');
