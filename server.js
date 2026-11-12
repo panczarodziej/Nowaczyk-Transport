@@ -287,7 +287,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const admin=auth(req)&&u.searchParams.get('mine')!=='1',name=me.username.toLowerCase();
   const wallets=db.wallets||{},orders=db.shopOrders||[],payments=db.payments||[],rates=db.driverRates||{};
-  return send(res,200,{wallets:admin?wallets:{[name]:wallets[name]||0},orders:admin?orders:orders.filter(x=>x.driver===name),payments:admin?payments:payments.filter(x=>x.driver===name),rates:admin?rates:{[name]:rates[name]??0.7},items:db.shopItems||[],earnings:(db.routes||[]).filter(r=>r.settledAt&&(admin||r.driver.toLowerCase()===name)).map(r=>({id:r.id,driver:r.driver,km:r.drivenKm,rate:r.payRate??0.7,earned:Math.round(r.drivenKm*(r.payRate??0.7)*100)/100,settledAt:r.settledAt}))});
+  const history=[...payments.map(p=>({id:p.id,driver:p.driver,type:'wypłata',description:'Wypłata za '+p.month,amount:Number(p.amount),createdAt:p.createdAt,bonus:Number(p.bonus||0),deduction:Number(p.deduction||0)})),...orders.filter(o=>o.status==='Zatwierdzone').map(o=>({id:o.id,driver:o.driver,type:'zakup',description:o.name,amount:-Number(o.price),createdAt:o.decidedAt||o.createdAt})),...(db.fines||[]).map(f=>({id:f.id,driver:f.driver,type:'mandat',description:f.reason,amount:-Number(f.amount),createdAt:f.createdAt}))].filter(x=>admin||x.driver===name).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+
+  return send(res,200,{wallets:admin?wallets:{[name]:wallets[name]||0},orders:admin?orders:orders.filter(x=>x.driver===name),payments:admin?payments:payments.filter(x=>x.driver===name),rates:admin?rates:{[name]:rates[name]??0.7},items:db.shopItems||[],history,earnings:(db.routes||[]).filter(r=>r.settledAt&&(admin||r.driver.toLowerCase()===name)).map(r=>({id:r.id,driver:r.driver,km:r.drivenKm,rate:r.payRate??0.7,earned:Math.round(r.drivenKm*(r.payRate??0.7)*100)/100,settledAt:r.settledAt}))});
  }
  if(u.pathname==='/api/economy/rate'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
