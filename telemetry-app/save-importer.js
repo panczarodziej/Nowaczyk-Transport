@@ -121,9 +121,14 @@ if(!slot&&ramps){
   const [medium,hard]=['medium','hard'].map(type=>validPlacement(points[type]?.[0])?points[type][0]:target);
   const numbers={units_count:Number(field(slot,'units_count')),ferry_time:Number(field(slot,'ferry_time')||0),ferry_price:Number(field(slot,'ferry_price')||0),urgency:Number(field(slot,'urgency')||0)};
   if(Object.values(numbers).some(n=>!Number.isSafeInteger(n)||n<0)||!numbers.units_count)throw Error('Nieprawidłowe dane wzorcowej oferty ETS2.');
+  // ETS2 records the accepted cargo-market offer seed as cargo_model_index.
+  const offerSeeds=[...from.text.matchAll(/^ *cargo_offer_seeds\[\d+\]: *([0-9]+) *\r?$/gm)]
+   .map(match=>Number(match[1]));
+  const cargoModelIndex=offerSeeds.find(seed=>Number.isSafeInteger(seed)&&seed>clock&&seed<=0x7fffffff);
+  if(cargoModelIndex===undefined)throw Error('Firma załadunku nie ma aktualnych ofert rynku ładunków. Odśwież ręczny zapis ETS2 i spróbuj ponownie.');
   const id='_nameless.aaa.'+crypto.randomBytes(2).toString('hex')+'.'+crypto.randomBytes(2).toString('hex');
   if(list.some(unit=>unit.id===id))throw Error('Konflikt identyfikatora zlecenia. Spróbuj ponownie.');
-  const properties={company_truck:'null',company_trailer:'null',target_placement:target,target_placement_medium:medium,target_placement_hard:hard,target_placement_rigid:'(0, &60ad78ec, 0) (1; 0, 0, 0)',source_placement:sourcePlacement,selected_target:'nil',time_lower_limit:clock+6000,time_upper_limit:clock+8000,job_distance:0,fuel_consumed:0,last_reported_fuel:0,total_fines:0,is_trailer_loaded:'false',online_job_id:'nil',online_job_trailer_model:'null',autoload_used:'false',cargo:field(slot,'cargo'),source_company:from.id,target_company:to.id,is_articulated:'false',is_cargo_market_job:'true',start_time:clock,planned_distance_km:km,special:'null',fill_ratio:1,...numbers};
+  const properties={company_truck:'null',company_trailer:'null',target_placement:target,target_placement_medium:medium,target_placement_hard:hard,target_placement_rigid:'(0, &60ad78ec, 0) (1; 0, 0, 0)',source_placement:sourcePlacement,selected_target:'nil',time_lower_limit:clock+6000,time_upper_limit:clock+8000,job_distance:0,fuel_consumed:0,last_reported_fuel:0,total_fines:0,is_trailer_loaded:'false',online_job_id:'nil',online_job_trailer_model:'null',autoload_used:'false',cargo:field(slot,'cargo'),source_company:from.id,target_company:to.id,cargo_model_index:cargoModelIndex,is_articulated:'false',is_cargo_market_job:'true',start_time:clock,planned_distance_km:km,special:'null',fill_ratio:1,...numbers};
   const changed=text.slice(0,player.start)+replaceField(player.text,'current_job',id)+text.slice(player.end);
   const end=changed.lastIndexOf('}');
   const jobUnit='\nplayer_job : '+id+' {\n'+Object.entries(properties).map(([key,value])=>' '+key+': '+value).join('\n')+'\n}\n';

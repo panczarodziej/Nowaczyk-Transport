@@ -9,6 +9,9 @@ economy : _economy {
 company : company.volatile.transinet.krakow {
  job_offer: 1
  job_offer[0]: _job
+ cargo_offer_seeds: 2
+ cargo_offer_seeds[0]: 999
+ cargo_offer_seeds[1]: 1800
 }
 company : company.volatile.tradeaux.berlin {
  job_offer: 0
@@ -96,6 +99,8 @@ trailer_def : trailer_def.scs.box {
  const modern=plan(fixture,ownedJob,{source:point});
  assert.match(modern.text,/is_cargo_market_job: true/);
  assert.match(modern.text,/is_trailer_loaded: false/);
+ assert.match(modern.text,/cargo_model_index: 1800/);
+ assert.throws(()=>plan(fixture.replace("cargo_offer_seeds[1]: 1800","cargo_offer_seeds[1]: 998"),ownedJob,{source:point}),/nie ma aktualnych ofert/);
  const legacy=fixture.replace(' assigned_vehicles: _vehicles',' assigned_trailer: _trailer\n my_trailer: _trailer\n my_trailer_attached: true');
  assert.match(plan(legacy,ownedJob,{source:point}).text,/is_cargo_market_job: true/);
  assert.throws(()=>plan(fixture.replace(' trailer: _trailer',' trailer: null'),ownedJob,{source:point}),/nie ma aktywnej/);
