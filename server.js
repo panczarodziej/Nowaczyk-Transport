@@ -107,6 +107,16 @@ function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='bos
 function canDispatch(req){return ['admin','dispatcher','boss'].includes(who(req)?.role)}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
 function body(req){return new Promise((resolve,reject)=>{let s='';req.on('data',b=>{s+=b;if(s.length>150000)req.destroy()});req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch{reject(new Error('Niepoprawny JSON'))}});req.on('error',reject)})}
+// Orientacyjne stawki wirtualnej spedycji PLN/km, bez podatku VAT.
+const roundPLN=n=>Math.round(n*100)/100;
+function quoteFreight(km,cargo,tons,trailerType){
+ const id=normalize(cargo);
+ const chilled=trailerType==='chlodnia'||/frozen|fresh|fish|meat|milk|cheese|yogurt|icecream|chlod|mroz|ryb|mies|nabial/.test(id);
+ const premium=/medical|medicine|pharma|electronic|computer|valuable|lek|elektronik/.test(id);
+ const base=chilled?5.7:4.6;
+ const rate=base+(premium?1.2:0)+Math.min(1.1,Math.max(0,Number(tons)||0)*0.035);
+ return roundPLN(Math.max(0,Number(km)||0)*rate);
+}
 function str(s,max=100){return typeof s==='string'?s.trim().slice(0,max):''}
 function client(req){return req.socket.remoteAddress||'unknown'}
 const limits=new Map();function rate(req,key,max=10){const k=client(req)+key,now=Date.now(),v=(limits.get(k)||[]).filter(t=>t>now-60000);v.push(now);limits.set(k,v);return v.length<=max}
@@ -153,11 +163,18 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDispatch(req))return send(res,403,{error:'Tylko kierownictwo i dyspozytorzy'});
   const companyId=who(req).companyId||MAIN_COMPANY_ID;
   const routes=(db.routes||[]).filter(route=>route.companyId===companyId);
+  const completed=routes.filter(route=>route.settledAt||route.deliveredAt||route.status==='Zakończona');
+  const earned=roundPLN(routes.filter(route=>route.settledAt).reduce((sum,route)=>sum+Number(route.freight||0),0));
+  const paid=roundPLN((db.payments||[]).filter(p=>routes.some(r=>r.driver.toLowerCase()===p.driver)).reduce((sum,p)=>sum+Number(p.amount||0),0));
   const drivers=[...accounts.values()].filter(account=>account.active&&account.companyId===companyId&&['driver','probation'].includes(account.role));
   const now=Date.now();
   return send(res,200,{
    km:Math.round(routes.reduce((sum,route)=>sum+(Number(route.drivenKm)||0),0)*10)/10,
-   deliveries:routes.filter(route=>route.deliveredAt||route.status==='Zakończona').length,
+   deliveries:completed.length,
+   completedRoutes:completed.length,
+   revenue:earned,
+   driverPayments:paid,
+   pendingDriverPay:roundPLN(routes.filter(r=>r.settledAt).reduce((sum,r)=>sum+Number(r.drivenKm||0)*Number(r.payRate??0.7),0)- (db.payments||[]).filter(p=>routes.some(r=>r.driver.toLowerCase()===p.driver)).reduce((sum,p)=>sum+Number(p.base||0),0)),
    openRoutes:routes.filter(route=>!route.deliveredAt&&route.status!=='Zakończona').length,
    drivers:drivers.length,
    online:drivers.filter(account=>now-Date.parse(db.fleetPositions?.[account.username.toLowerCase()]?.updatedAt)<45000).length,
@@ -366,7 +383,14 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
     event.distanceKm=Math.round(distance*10)/10;
     mileageRoute.drivenKm=Math.max(mileageRoute.drivenKm||0,event.distanceKm);
     mileageRoute.deliveredAt=event.receivedAt;
-    if(mileageRoute.drivenKm>0)mileageRoute.status='W trasie';
+    if(mileageRoute.drivenKm>0){
+     mileageRoute.status='Zakończona';
+     if(!mileageRoute.settledAt){
+      mileageRoute.settledAt=event.receivedAt;
+      db.ledger??=[];
+      db.ledger.push({id:crypto.randomUUID(),routeId:mileageRoute.id,companyId:mileageRoute.companyId,type:'fracht',amount:roundPLN(Number(mileageRoute.freight||0)),createdAt:event.receivedAt});
+     }
+    }
    }
   }
   db.telemetryEvents.push(event);if(db.telemetryEvents.length>5000)db.telemetryEvents.splice(0,db.telemetryEvents.length-5000);
@@ -418,6 +442,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(mapSetCompany(job.to.city,job.to.company))job.to.deliveryPlacements=nowaczykMap[job.to.city][job.to.company];
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="ks-job-'+r.id+'.json"','Cache-Control':'no-store'});return res.end(JSON.stringify(job,null,2));
  }
+ if(u.pathname==='/api/routes/quote'&&method==='POST'){
+  if(!canDispatch(req))return send(res,403,{error:'Brak uprawnień'});
+  const a=await body(req),km=Number(a.plannedKm),tons=Number(a.cargoTons||0);
+  if(!Number.isFinite(km)||km<0||km>20000||!Number.isFinite(tons)||tons<0||tons>100)return send(res,400,{error:'Nieprawidłowy dystans lub masa'});
+  const driver=str(a.driver,100).toLowerCase(),rate=(db.driverRates||{})[driver]??0.7;
+  return send(res,200,{freight:quoteFreight(km,a.cargo,tons,a.trailerType),driverPay:roundPLN(km*rate),driverRate:rate,estimated:true});
+ }
  if(u.pathname==='/api/routes/assignees'&&method==='GET'){
   if(!canDispatch(req))return send(res,403,{error:'Brak dostępu do listy kierowców'});
   return send(res,200,[...accounts.values()].filter(a=>a.active&&(['admin','driver','probation'].includes(a.role)||(a.role==='boss'&&a.companyId===MAIN_COMPANY_ID))).map(a=>a.username).sort());
@@ -447,7 +478,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!account?.active||!(['admin','driver','probation'].includes(account.role)||(account.role==='boss'&&account.companyId===MAIN_COMPANY_ID)))return send(res,400,{error:'Wybierz aktywne konto z listy kierowców'});
   const plannedKm=Number(a.plannedKm);
   if(!Number.isFinite(plannedKm)||plannedKm<0||plannedKm>20000)return send(res,400,{error:'Nieprawidłowy dystans'});
-  const freight=Number(a.freight||0);if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
+  const freightInput=a.freight===undefined||a.freight===null||a.freight===''?null:Number(a.freight);const freight=freightInput===null||freightInput===0?quoteFreight(plannedKm,a.cargo,a.cargoTons,a.trailerType):freightInput;if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
   if(!Number.isFinite(Number(a.cargoTons||0))||Number(a.cargoTons||0)<0||Number(a.cargoTons||0)>100)return send(res,400,{error:'Nieprawidłowa masa ładunku'});
   const trailerType=str(a.trailerType,20);
   if(trailerType&&!['firanka','chlodnia'].includes(trailerType))return send(res,400,{error:'Wybierz plandekę lub chłodnię.'});
