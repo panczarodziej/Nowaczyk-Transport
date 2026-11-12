@@ -82,6 +82,8 @@ async function loadDriverFinances(){
    return node('p',`${date} · Wypłata za ${payment.month}: ${money(payment.amount)} · Premia: ${money(payment.bonus)} · Potrącenie: ${money(payment.deduction)}`);
   }));
   if(!data.payments.length)history.textContent='Brak wypłat.';
+  const pending=data.earnings||[];
+  history.prepend(node('p','Naliczono za zakończone trasy: '+money(pending.reduce((sum,r)=>sum+Number(r.earned||0),0))+' (wypłacane po rozliczeniu miesiąca).'));
  }catch(error){balance.textContent='—';history.textContent='Nie udało się pobrać wypłat: '+error.message}
 }
 function costForm(type){const form=document.createElement('form');const fields=[['routeId','Trasa','select'],['country','Kraj','text'],['from','Skąd','text'],['to','Dokąd','text'],['amount','Kwota PLN','number']];for(const [name,title,kind]of fields){const label=node('label',title),el=document.createElement(kind==='select'?'select':'input');el.name=name;el.required=true;if(kind!=='select'){el.type=kind;if(kind==='number'){el.min='0.01';el.step='0.01'}}else{for(const r of routes){const o=document.createElement('option');o.value=r.id;o.textContent=r.from+' → '+r.to;el.append(o)}}label.append(el);form.append(label)}if(!routes.length){form.append(node('p','Najpierw spedytor musi przypisać Ci trasę.'))}const b=node('button','Zapisz koszt');b.className='btn';b.disabled=!routes.length;form.append(b);form.onsubmit=async e=>{e.preventDefault();const a=Object.fromEntries(new FormData(form));a.type=type;try{await api('/api/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(a)});notice('Zapisano koszt na serwerze');await reload()}catch(err){notice(err.message)}};return form}
