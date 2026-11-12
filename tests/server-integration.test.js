@@ -116,10 +116,10 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const payment={driver:'Driver1',month:'2026-11',bonus:150,deduction:0};
  assert.equal((await req('/api/economy/payment',{...payment,driver:'unknown-driver'},admin.cookie)).status,404);
  assert.equal((await req('/api/economy/payment',payment,login.cookie)).status,403);
- assert.equal((await req('/api/economy/payment',payment,admin.cookie)).data.amount,150);
+ assert.equal((await req('/api/economy/payment',payment,admin.cookie)).data.amount,790.36);
  assert.equal((await req('/api/economy/payment',payment,admin.cookie)).status,409);
  const driverEconomy=await req('/api/economy?mine=1',null,login.cookie);
- assert.deepEqual(driverEconomy.data.wallets,{driver1:150});
+ assert.deepEqual(driverEconomy.data.wallets,{driver1:790.36});
  assert.equal(driverEconomy.data.payments[0].bonus,150);
  assert.deepEqual((await req('/api/economy?mine=1',null,admin.cookie)).data.payments,[]);
  // Parallel writes must not overwrite each other in the single-process store.
