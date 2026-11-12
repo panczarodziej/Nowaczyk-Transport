@@ -15,7 +15,7 @@ async function updateQuote(){
  if(!(km>0)||!selectedCargo()){ $('quote').textContent='Wybierz ładunek i podaj kilometry, aby zobaczyć wycenę.';return }
  try{
   const q=await api('/api/routes/quote','POST',{driver:val('driverName'),plannedKm:km,cargo:selectedCargo(),cargoTons:Number(val('cargoTons')),trailerType:val('trailerType')});
-  $('quote').textContent='Szacowany fracht dla firmy: '+q.freight.toFixed(2)+' zł | Wynagrodzenie kierowcy: '+q.driverPay.toFixed(2)+' zł ('+q.driverRate.toFixed(2)+' zł/km). Fracht trafi na konto firmy po dostawie.';
+  $('quote').textContent='Szacowany fracht dla firmy: '+q.freight.toFixed(2)+' zł zł. Fracht trafi na konto firmy po dostawie.';
   $('freight').value=q.freight.toFixed(2);
  }catch(e){$('quote').textContent='Wycena niedostępna: '+e.message}
 }
