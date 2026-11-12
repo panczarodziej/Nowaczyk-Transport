@@ -159,6 +159,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,200,state);
  }
  if(u.pathname==='/api/telemetry/me'&&method==='GET'){const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});const p=db.fleetPositions?.[me.username.toLowerCase()]||null;return send(res,200,{position:p,online:!!p&&Date.now()-Date.parse(p.updatedAt)<45000,events:(db.telemetryEvents||[]).filter(e=>e.driver===me.username.toLowerCase()).slice(-30)})}
+ if(u.pathname==='/api/driver/mileage'&&method==='GET'){
+  const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
+  const driver=me.username.toLowerCase(),companyId=me.companyId||MAIN_COMPANY_ID;
+  const routes=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===companyId);
+  const completed=routes.filter(r=>r.deliveredAt||r.status==='Zakończona');
+  return send(res,200,{driver:me.username,companyId,km:Math.round(routes.reduce((n,r)=>n+(Number(r.drivenKm)||0),0)*10)/10,completedKm:Math.round(completed.reduce((n,r)=>n+(Number(r.drivenKm)||0),0)*10)/10,completedRoutes:completed.length,allRoutes:routes.length,source:'server',updatedAt:new Date().toISOString()});
+ }
  if(u.pathname==='/api/company/summary'&&method==='GET'){
   if(!canDispatch(req))return send(res,403,{error:'Tylko kierownictwo i dyspozytorzy'});
   const companyId=who(req).companyId||MAIN_COMPANY_ID;
