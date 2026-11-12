@@ -1,11 +1,30 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{spawn}=require('node:child_process');
 test('login → dispatch → nested export → telemetry → driver panel and deduplication',async()=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nt-server-'));fs.writeFileSync(path.join(dir,'data.json'),JSON.stringify({companies:[{id:'ks',name:'Nowaczyk Transport'}],initialBudgets:{ks:{initialCents:100,lockedAt:'2026-01-01'}}}));const port=20000+Math.floor(Math.random()*20000),base='http://127.0.0.1:'+port;const child=spawn(process.execPath,[path.resolve(__dirname,'../server.js')],{env:{...process.env,DATABASE_URL:'',DATA_FILE:path.join(dir,'data.json'),PORT:String(port),ADMIN_PASSWORD:'integration-password-only',COOKIE_SECURE:'0'},stdio:['ignore','pipe','pipe']});
- let logs='';child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nt-server-'));fs.writeFileSync(path.join(dir,'data.json'),JSON.stringify({companies:[{id:'ks',name:'Nowaczyk Transport'}],initialBudgets:{ks:{initialCents:100,lockedAt:'2026-01-01'}}}));const port=20000+Math.floor(Math.random()*20000),base='http://127.0.0.1:'+port;const start=()=>spawn(process.execPath,[path.resolve(__dirname,'../server.js')],{env:{...process.env,DATABASE_URL:'',DATA_FILE:path.join(dir,'data.json'),PORT:String(port),ADMIN_PASSWORD:'integration-password-only',COOKIE_SECURE:'0'},stdio:['ignore','pipe','pipe']});
+ let child;
+ function launch(){
+  child=start();
+  let logs='';
+  child.stderr.on('data',chunk=>logs+=chunk);
+  return new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>reject(Error(logs)),8000);
+   child.stdout.on('data',chunk=>{
+    logs+=chunk;
+    if(logs.includes('Online:')){clearTimeout(timer);resolve()}
+   });
+   child.once('exit',code=>{clearTimeout(timer);reject(Error('Server '+code+' '+logs))});
+  });
+ }
+ async function stop(){
+  if(!child||child.exitCode!==null||child.signalCode!==null)return;
+  const exited=new Promise(resolve=>child.once('exit',resolve));
+  child.kill();
+  await exited;
+ }
  async function req(url,data,cookie,headers={}){const r=await fetch(base+url,{method:data?'POST':'GET',headers:{'Content-Type':'application/json',Cookie:cookie||'',...headers},body:data?JSON.stringify(data):undefined});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]}}
  try{
- await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(logs)),8000);child.stdout.on('data',()=>{if(logs.includes('Online:')){clearTimeout(timer);resolve()}});child.on('exit',code=>{clearTimeout(timer);reject(Error('Server '+code+' '+logs))})});
+ await launch();
  const admin=await req('/api/accounts/login',{username:'admin',password:'integration-password-only'});assert.equal(admin.status,200);assert.equal(admin.data.user.companyId,'nowaczyk');
  assert.equal((await req('/api/companies')).data[0].id,'nowaczyk');
  assert.equal((await req('/api/budgets',null,admin.cookie)).data[0].initialCents,100);
@@ -46,6 +65,13 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,{'X-Nowaczyk-Client':'desktop'})).status,403);
  assert.equal((await req('/api/desktop/login',{username:'driver1',password:'driver-password-only'},null,{'X-Nowaczyk-Client':'desktop',Origin:base})).status,403);
  const desktop=await req('/api/desktop/login',{username:'driver1',password:'driver-password-only'},null,{'X-Nowaczyk-Client':'desktop'});assert.equal(desktop.status,200);assert.ok(desktop.data.desktopToken);
+ const persisted=fs.readFileSync(path.join(dir,'data.json'),'utf8');
+ assert.ok(!persisted.includes(desktop.cookie.split('=')[1]));
+ assert.ok(!persisted.includes(desktop.data.desktopToken));
+ await stop();
+ await launch();
+ assert.equal((await req('/api/accounts/me',null,desktop.cookie)).data.user.username,'driver1');
+ assert.equal((await req('/api/fleet/position',{x:10,z:20,speedKmh:60},desktop.cookie)).status,200);
  const desktopHeaders={'X-Nowaczyk-Desktop-Token':desktop.data.desktopToken};
  assert.equal((await req('/api/routes/progress',{id:assigned.data.id,drivenKm:10,status:'W trasie'},admin.cookie)).status,409);
  const accepted=await req('/api/routes/accept',{routeId:assigned.data.id},desktop.cookie,desktopHeaders);assert.equal(accepted.status,200);assert.equal(accepted.data.route.status,'Przyjęta');assert.equal(accepted.data.route.acceptedVia,'desktop');
@@ -139,5 +165,5 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/accounts/password',{currentPassword:'dispatcher-password-only',newPassword:'boss-new-password'},dispatcher.cookie)).status,200);
  assert.equal((await req('/api/accounts/login',{username:'dispatcher1',password:'boss-new-password'})).status,200);
  assert.equal((await req('/api/login',{password:'integration-password-only'})).status,405);
- }finally{child.kill();await new Promise(resolve=>child.once('exit',resolve));fs.rmSync(dir,{recursive:true,force:true})}
+ }finally{await stop();fs.rmSync(dir,{recursive:true,force:true})}
 });

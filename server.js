@@ -5,9 +5,7 @@ const PORT=Number(process.env.PORT||3000),ROOT=path.join(__dirname,'public'),DB=
 const password=process.env.ADMIN_PASSWORD;
 if(!password || password.length<12){console.error('Ustaw ADMIN_PASSWORD (min. 12 znaków) przed startem.');process.exit(1)}
 const salt=crypto.randomBytes(16).toString('hex'),hash=crypto.scryptSync(password,salt,64);
-const sessions=new Map();
 // Osobna, losowa zdolność przyjmowania tras dla sesji natywnego klienta.
-const desktopSessions=new Map();
 const ROLES=['admin','dispatcher','driver','probation','mechanic','boss','subcontractor'];
 const accounts=new Map();
 const {europe,poland,middleEast}=require('./public/ets2-catalog.json');
@@ -97,10 +95,22 @@ async function save(db){
  const temp=DB+'.tmp';fs.writeFileSync(temp,JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(temp,DB);
 }
 function send(res,code,obj,headers={}){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(obj))}
-function who(req){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1],v=token&&sessions.get(token);if(!v)return null;const account=accounts.get(v.username.toLowerCase());return v.expires>Date.now()&&account?.active?{...safeAccount(account),expires:v.expires}:null}
-function revokeAccountSessions(id){
- for(const [token,session] of sessions){
-  if(session.id===id){sessions.delete(token);desktopSessions.delete(token)}
+const sessionLifetimeSeconds=43200;
+const requestSession=Symbol('requestSession');
+const digestToken=token=>crypto.createHash('sha256').update(token).digest('hex');
+function sessionKey(req){
+ const token=/(?:^|;\s*)ks_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie||'')?.[1];
+ return token?digestToken(token):null;
+}
+function who(req){
+ const session=req[requestSession];
+ if(!session||session.expires<=Date.now())return null;
+ const account=accounts.get(session.username.toLowerCase());
+ return account?.active&&account.id===session.id?{...safeAccount(account),expires:session.expires}:null;
+}
+function revokeAccountSessions(db,id){
+ for(const [key,session] of Object.entries(db.authSessions||{})){
+  if(session.id===id)delete db.authSessions[key];
  }
 }
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
@@ -124,6 +134,8 @@ const mime={'.html':'text/html; charset=utf-8','.js':'application/javascript','.
 let mutationTail=Promise.resolve();
 const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].includes(req.method)){const previous=mutationTail;mutationTail=new Promise(resolve=>{release=resolve});await previous}try{
  const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();
+ const key=sessionKey(req);
+ req[requestSession]=key?db.authSessions?.[key]:null;
  // Centrum floty: dane pozycji z uwierzytelnionego konta; NIE jest to jeszcze integracja z ETS2.
  if(u.pathname==='/api/client-release'&&method==='GET'){let url='https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download/Nowaczyk-Transport-Setup.exe';try{const candidate=new URL(process.env.TELEMETRY_DOWNLOAD_URL||'');if(candidate.protocol==='https:')url=candidate.href}catch{}return send(res,200,{version:'0.3.4',available:!!url,url})}
  if(u.pathname==='/api/tachograph'&&['GET','POST'].includes(method)){
@@ -424,9 +436,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  // Eksport zlecenia kierowcy — bez wstrzykiwania do giełdy ETS2.
  if(u.pathname==='/api/routes/accept'&&method==='POST'){
   const me=who(req);if(!me||!canDrive(req))return send(res,403,{error:'Wymagane konto kierowcy'});
-  const sessionToken=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1];
-  const expected=desktopSessions.get(sessionToken),provided=req.headers['x-nowaczyk-desktop-token'];
-  if(req.headers.origin||!expected||typeof provided!=='string'||provided.length!==expected.length||!crypto.timingSafeEqual(Buffer.from(provided),Buffer.from(expected)))return send(res,403,{error:'Trasę przyjmiesz wyłącznie po zalogowaniu w aplikacji Nowaczyk Transport.'});
+  const expected=req[requestSession]?.desktopDigest,provided=req.headers['x-nowaczyk-desktop-token'];
+  if(req.headers.origin||!expected||typeof provided!=='string'||!/^[a-f0-9]{64}$/.test(provided)||!crypto.timingSafeEqual(Buffer.from(digestToken(provided),'hex'),Buffer.from(expected,'hex')))return send(res,403,{error:'Trasę przyjmiesz wyłącznie po zalogowaniu w aplikacji Nowaczyk Transport.'});
   const a=await body(req),r=(db.routes||[]).find(x=>x.id===a.routeId);
   if(!r)return send(res,404,{error:'Nie znaleziono trasy'});
   if(r.driver.toLowerCase()!==me.username.toLowerCase()||r.companyId!==(me.companyId||MAIN_COMPANY_ID))return send(res,403,{error:'To nie jest Twoja trasa'});
@@ -582,11 +593,27 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const candidate=acct?.active?crypto.scryptSync(str(a.password,300),acct.salt,64):dummy;
   const expected=acct?.active?Buffer.from(acct.hash,'hex'):hash;
   if(!acct||!acct.active||!crypto.timingSafeEqual(candidate,expected))return send(res,401,{error:'Nieprawidłowy login lub hasło'});
-  const token=crypto.randomBytes(32).toString('hex');sessions.set(token,{...safeAccount(acct),expires:Date.now()+12*3600000});
-  const desktopToken=desktop?crypto.randomBytes(32).toString('hex'):undefined;if(desktop)desktopSessions.set(token,desktopToken);
-  return send(res,200,{ok:true,user:safeAccount(acct),desktopToken},{'Set-Cookie':`ks_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${process.env.COOKIE_SECURE==='1'?'; Secure':''}`});
+  const token=crypto.randomBytes(32).toString('hex');
+  const desktopToken=desktop?crypto.randomBytes(32).toString('hex'):undefined;
+  const now=Date.now();
+  db.authSessions??={};
+  for(const [key,session] of Object.entries(db.authSessions)){
+   if(session.expires<=now)delete db.authSessions[key];
+  }
+  const previousKey=sessionKey(req);
+  if(previousKey)delete db.authSessions[previousKey];
+  db.authSessions[digestToken(token)]={id:acct.id,username:acct.username,expires:now+sessionLifetimeSeconds*1000,desktopDigest:desktopToken?digestToken(desktopToken):undefined};
+  await save(db);
+  return send(res,200,{ok:true,user:safeAccount(acct),desktopToken},{'Set-Cookie':`ks_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionLifetimeSeconds}${process.env.COOKIE_SECURE==='1'?'; Secure':''}`});
  }
- if(u.pathname==='/api/logout'&&method==='POST'){const token=/ks_session=([a-f0-9]+)/.exec(req.headers.cookie||'')?.[1];if(token){sessions.delete(token);desktopSessions.delete(token)}return send(res,200,{ok:true},{'Set-Cookie':'ks_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'})}
+ if(u.pathname==='/api/logout'&&method==='POST'){
+  const key=sessionKey(req);
+  if(key&&db.authSessions?.[key]){
+   delete db.authSessions[key];
+   await save(db);
+  }
+  return send(res,200,{ok:true},{'Set-Cookie':'ks_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'});
+ }
  if(u.pathname==='/api/accounts/password'&&method==='POST'){
   const me=who(req),account=me?.id&&accounts.get(me.username.toLowerCase());
   if(!account)return send(res,401,{error:'Zaloguj się na swoje konto'});
@@ -598,11 +625,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!crypto.timingSafeEqual(candidate,Buffer.from(account.hash,'hex')))return send(res,403,{error:'Obecne hasło jest nieprawidłowe.'});
   const updated={...account,...passwordHash(next)};
   db.accounts=[...accounts.values()].map(x=>x.id===account.id?updated:x);
+  revokeAccountSessions(db,account.id);
   await save(db);
   accounts.set(account.username.toLowerCase(),updated);
-  for(const [token,session] of sessions){
-   if(session.id===account.id){sessions.delete(token);desktopSessions.delete(token)}
-  }
   return send(res,200,{ok:true},{'Set-Cookie':'ks_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'+(process.env.COOKIE_SECURE==='1'?'; Secure':'')});
  }
  if(u.pathname==='/api/accounts/me'&&method==='GET')return send(res,200,{user:who(req)});
@@ -629,7 +654,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(typeof a.active==='boolean')acct.active=a.active;
   if(a.password!==undefined)Object.assign(acct,passwordHash(a.password));
   if(a.role!==undefined&&ROLES.includes(a.role)&&acct.role!=='admin')acct.role=a.role;
-  if(!acct.active||a.password!==undefined)revokeAccountSessions(acct.id);
+  if(!acct.active||a.password!==undefined)revokeAccountSessions(db,acct.id);
   db.accounts=[...accounts.values()];await save(db);return send(res,200,safeAccount(acct));
  }
  if(u.pathname==='/api/accounts/delete'&&method==='POST'){
@@ -641,7 +666,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   acct.deletedAt=new Date().toISOString();
   delete acct.hash;
   delete acct.salt;
-  revokeAccountSessions(acct.id);
+  revokeAccountSessions(db,acct.id);
   db.accounts=[...accounts.values()];await save(db);
   return send(res,200,{ok:true});
  }
