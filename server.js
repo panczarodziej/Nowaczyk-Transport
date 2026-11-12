@@ -401,7 +401,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const previous=db.telemetryEvents.find(e=>(e.mileageRouteId||e.routeId)===mileageRoute.id&&e.driver===driver&&e.companyId===event.companyId&&e.type==='job-started'&&Number.isFinite(e.telemetry?.odometerKm));
    const odometerDistance=previous&&Number.isFinite(telemetry.odometerKm)?telemetry.odometerKm-previous.telemetry.odometerKm:null;
    const distance=telemetry.jobDeliveredDistanceKm??odometerDistance;
-   if(distance!==null&&distance>=0&&distance<=100000){
+   if(distance!==null&&distance>0&&distance<=100000){
     event.distanceKm=Math.round(distance*10)/10;
     mileageRoute.drivenKm=Math.max(mileageRoute.drivenKm||0,event.distanceKm);
     mileageRoute.deliveredAt=event.receivedAt;
@@ -479,7 +479,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const {id}=await body(req),index=(db.routes||[]).findIndex(route=>route.id===id);
   if(index<0)return send(res,404,{error:'Nie znaleziono trasy'});
   const route=db.routes[index];
-  if(route.status==='Zakończona'||(db.expenses||[]).some(expense=>expense.routeId===id))return send(res,409,{error:'Trasa zakończona lub ma zapisane koszty.'});
+  if(route.deliveredAt||route.settledAt||route.status==='Zakończona'||Number(route.drivenKm)>0||(db.expenses||[]).some(expense=>expense.routeId===id))return send(res,409,{error:'Trasa ma zapisane kilometry, dostawę lub koszty.'});
   db.archivedRoutes??=[];
   db.archivedRoutes.push({...route,archivedAt:new Date().toISOString()});
   db.routes.splice(index,1);
@@ -524,6 +524,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDispatch(req))return send(res,403,{error:'Trasy może przydzielać lub aktualizować Szef, Spedytor albo Administrator.'});
   const a=await body(req),r=(db.routes||[]).find(x=>x.id===a.id);
   if(!r)return send(res,404,{error:'Nie znaleziono trasy'});
+  if(r.deliveredAt||r.settledAt||r.status==='Zakończona')return send(res,409,{error:'Ukończona trasa ma już zapisany przebieg.'});
   const km=Number(a.drivenKm);if(!Number.isFinite(km)||km<0||km>100000)return send(res,400,{error:'Nieprawidłowy przebieg'});
   if(!r.acceptedAt&&(km>0||a.status&&a.status!=='Przydzielona'))return send(res,409,{error:'Kierowca musi najpierw przyjąć trasę w aplikacji'});
   if(km<r.drivenKm)return send(res,400,{error:'Przebieg nie może się zmniejszać'});
