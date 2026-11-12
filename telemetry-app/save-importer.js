@@ -49,6 +49,8 @@ function loadingPoint(side){
  return side.loadingPlacement;
 }
 function plan(text,job,ramps){
+ const nativeMarket=ramps?.market===true;
+ if(nativeMarket)ramps=null;
  const list=units(text),source=job.from||{},dest=job.to||{},cargo=job.cargo||{};
  if(!source.company||!source.city||!dest.company||!dest.city||!cargo.name)throw Error('Dyspozytor musi podać obie firmy, oba miasta i towar.');
  const companies=list.filter(u=>u.type==='company'&&u.id.startsWith('company.volatile.'));
@@ -60,6 +62,7 @@ function plan(text,job,ramps){
  const allowedTypes={firanka:['curtainside',/(?:^|\.)curtain(?:_|$)/i],chlodnia:['refrigerated',/(?:^|\.)reefer(?:_|$)/i]};
  let expected=Object.hasOwn(allowedTypes,job.trailerType)?allowedTypes[job.trailerType]:null;
  const player=list.find(unit=>unit.type==='player');
+ if(nativeMarket&&(!player||field(player,'current_job')!=='null'||field(player,'selected_job')!=='null'))throw Error('Użyj ręcznego zapisu sprzed importu, bez aktywnego zlecenia.');
  if(ramps){
   if(!player||field(player,'current_job')!=='null'||field(player,'selected_job')!=='null')throw Error('Zakończ aktywne zlecenie i usuń wybraną ofertę przed importem.');
   const vehiclesRef=field(player,'assigned_vehicles');
@@ -93,9 +96,9 @@ function plan(text,job,ramps){
 // For an owned-trailer job we construct player_job directly, so a valid
 // cargo/trailer template may come from another company in the same save.
 // The source company must still exist and both loading/delivery points are validated.
-if(!slot&&ramps){
+if(!slot&&(ramps||nativeMarket)){
  const matches=list.filter(offer=>{
-  if(offer.type!=='job_offer_data'||!field(offer,'units_count'))return false;
+  if(offer.type!=='job_offer_data'||Number(field(offer,'units_count'))<=0)return false;
   if(norm(cargoId(offer))!==norm(cargo.id||cargo.name))return false;
   const ref=field(offer,'trailer_definition');
   if(!ref)return false;
@@ -134,8 +137,16 @@ if(!slot&&ramps){
   const jobUnit='\nplayer_job : '+id+' {\n'+Object.entries(properties).map(([key,value])=>' '+key+': '+value).join('\n')+'\n}\n';
   return {text:changed.slice(0,end)+jobUnit+changed.slice(end),notice:'Aktywne zlecenie zapisane. Wczytaj zmieniony zapis w ETS2 i sprawdź punkt załadunku.'};
  }
+ const sourceSlot=nativeMarket&&!refs.has(slot.id)
+  ? list.find(offer=>offer.type==='job_offer_data'&&refs.has(offer.id)&&field(offer,'cargo')==='null'&&field(offer,'units_count')==='0')
+  : slot;
+ if(!sourceSlot)throw Error('Firma załadunku nie ma wolnego miejsca na ofertę. Odśwież rynek i użyj nowego ręcznego zapisu.');
  const target=to.id.slice(17);let replacement=replaceField(slot.text,'target',JSON.stringify(target));replacement=replaceField(replacement,'expiration_time',clock+7*24*60);replacement=replaceField(replacement,'shortest_distance_km',km);
- return {text:text.slice(0,slot.start)+replacement+text.slice(slot.end),offerId:slot.id,source:from.id,target:to.id,unitsCount:Number(field(slot,'units_count')),notice:'Oferta zapisana. Wczytaj zmieniony zapis w ETS2 i odbierz ładunek w firmie. Masa wynika z definicji towaru i zachowanej liczby jednostek; system porówna ją z tonami zlecenia.'};
+ if(sourceSlot!==slot){
+  replacement=replacement.replace(slot.id,sourceSlot.id);
+  replacement=replaceField(replacement,'trailer_place',field(sourceSlot,'trailer_place')||'0');
+ }
+ return {text:text.slice(0,sourceSlot.start)+replacement+text.slice(sourceSlot.end),offerId:sourceSlot.id,source:from.id,target:to.id,unitsCount:Number(field(slot,'units_count')),notice:nativeMarket?'Wczytaj zapis i przyjmij trasę na Rynku przesyłek ETS2, w firmie załadunku. Do odbioru użyj naczepy z oferty gry.':'Oferta zapisana. Wczytaj zmieniony zapis w ETS2 i odbierz ładunek w firmie. Masa wynika z definicji towaru i zachowanej liczby jednostek; system porówna ją z tonami zlecenia.'};
 }
 function importFile(file,job,ramps){
  if(path.basename(file).toLowerCase()!=='game.sii')throw Error('Wybierz plik game.sii');
