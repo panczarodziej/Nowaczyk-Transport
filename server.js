@@ -95,7 +95,8 @@ async function save(db){
  const temp=DB+'.tmp';fs.writeFileSync(temp,JSON.stringify(db,null,2),{mode:0o600});fs.renameSync(temp,DB);
 }
 function send(res,code,obj,headers={}){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(obj))}
-const sessionLifetimeSeconds=43200;
+const desktopSessionLifetimeSeconds=12*60*60;
+const webSessionLifetimeSeconds=7*24*60*60;
 const requestSession=Symbol('requestSession');
 const digestToken=token=>crypto.createHash('sha256').update(token).digest('hex');
 function sessionKey(req){
@@ -586,6 +587,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(['/api/accounts/login','/api/desktop/login'].includes(u.pathname)&&method==='POST'){
   const desktop=u.pathname==='/api/desktop/login';
+  const sessionLifetimeSeconds=desktop?desktopSessionLifetimeSeconds:webSessionLifetimeSeconds;
   if(desktop&&(req.headers.origin||req.headers['x-nowaczyk-client']!=='desktop'))return send(res,403,{error:'Zaloguj się przez aplikację'});
   if(!rate(req,'accounts-login',8))return send(res,429,{error:'Za dużo prób'});
   const a=await body(req),name=str(a.username,50).toLowerCase(),acct=accounts.get(name);

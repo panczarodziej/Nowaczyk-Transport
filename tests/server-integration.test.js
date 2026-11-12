@@ -22,14 +22,14 @@ test('login → dispatch → nested export → telemetry → driver panel and de
   child.kill();
   await exited;
  }
- async function req(url,data,cookie,headers={}){const r=await fetch(base+url,{method:data?'POST':'GET',headers:{'Content-Type':'application/json',Cookie:cookie||'',...headers},body:data?JSON.stringify(data):undefined});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]}}
+ async function req(url,data,cookie,headers={}){const r=await fetch(base+url,{method:data?'POST':'GET',headers:{'Content-Type':'application/json',Cookie:cookie||'',...headers},body:data?JSON.stringify(data):undefined});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0],setCookie:r.headers.get('set-cookie')}}
  try{
  await launch();
  const admin=await req('/api/accounts/login',{username:'admin',password:'integration-password-only'});assert.equal(admin.status,200);assert.equal(admin.data.user.companyId,'nowaczyk');
  assert.equal((await req('/api/companies')).data[0].id,'nowaczyk');
  assert.equal((await req('/api/budgets',null,admin.cookie)).data[0].initialCents,100);
  const created=await req('/api/accounts',{username:'driver1',password:'driver-password-only',role:'driver'},admin.cookie);assert.equal(created.status,201);
- const login=await req('/api/accounts/login',{username:'driver1',password:'driver-password-only'});assert.equal(login.status,200);
+ const login=await req('/api/accounts/login',{username:'driver1',password:'driver-password-only'});assert.equal(login.status,200);assert.match(login.setCookie,/Max-Age=604800/);
  const route={from:'Krakow',to:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'Palety',cargoTons:18,plannedKm:600,driver:'driver1'};
  const dispatcherAccount=await req('/api/accounts',{username:'dispatcher1',password:'dispatcher-password-only',role:'dispatcher'},admin.cookie);
  assert.equal(dispatcherAccount.status,201);
@@ -64,13 +64,17 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  // Website sessions cannot accept, even when a client name header is supplied.
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,{'X-Nowaczyk-Client':'desktop'})).status,403);
  assert.equal((await req('/api/desktop/login',{username:'driver1',password:'driver-password-only'},null,{'X-Nowaczyk-Client':'desktop',Origin:base})).status,403);
- const desktop=await req('/api/desktop/login',{username:'driver1',password:'driver-password-only'},null,{'X-Nowaczyk-Client':'desktop'});assert.equal(desktop.status,200);assert.ok(desktop.data.desktopToken);
+ const desktop=await req('/api/desktop/login',{username:'driver1',password:'driver-password-only'},null,{'X-Nowaczyk-Client':'desktop'});assert.equal(desktop.status,200);assert.match(desktop.setCookie,/Max-Age=43200/);assert.ok(desktop.data.desktopToken);
  const persisted=fs.readFileSync(path.join(dir,'data.json'),'utf8');
  assert.ok(!persisted.includes(desktop.cookie.split('=')[1]));
  assert.ok(!persisted.includes(desktop.data.desktopToken));
+ const sessions=Object.values(JSON.parse(persisted).authSessions).filter(session=>session.username==='driver1');
+ const remainingHours=sessions.map(session=>Math.round((session.expires-Date.now())/3600000)).sort((a,b)=>a-b);
+ assert.deepEqual(remainingHours,[12,168]);
  await stop();
  await launch();
  assert.equal((await req('/api/accounts/me',null,desktop.cookie)).data.user.username,'driver1');
+ assert.equal((await req('/api/accounts/me',null,login.cookie)).data.user.username,'driver1');
  assert.equal((await req('/api/fleet/position',{x:10,z:20,speedKmh:60},desktop.cookie)).status,200);
  const desktopHeaders={'X-Nowaczyk-Desktop-Token':desktop.data.desktopToken};
  assert.equal((await req('/api/routes/progress',{id:assigned.data.id,drivenKm:10,status:'W trasie'},admin.cookie)).status,409);
