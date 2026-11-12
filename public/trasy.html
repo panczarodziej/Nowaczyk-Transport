@@ -31,18 +31,21 @@ async function archiveRoute(id){
 async function exportJob(id){try{const response=await fetch('/api/routes/export?id='+encodeURIComponent(id),{credentials:'same-origin'});if(!response.ok)throw Error('Nie udało się wyeksportować zlecenia');const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='ks-job-'+id+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);msg('Zlecenie pobrane jako JSON. To manifest, a nie automatycznie wygenerowany kurs ETS2.')}catch(e){msg(e.message)}}async function addRoute(){try{const cargo=val('cargoPicker')==='__manual__'?val('cargo'):val('cargoPicker');if(!cargo)throw Error($('cargoPicker').disabled?'Brak pasujących ładunków. Zmień firmę lub typ naczepy.':'Wybierz ładunek.');if(!val('sourceCompany'))throw Error('Wybierz firmę załadunku.');if(outgoingCargo(val('sourceCompany'))&&!outgoingCargo(val('sourceCompany')).includes(cargo))throw Error('BŁĄD: Firma załadunku nie wysyła tego towaru. Wybierz ładunek z podpowiedzi.');const compatible=destinationCompatibility(val('destinationCompany'),cargo);if(!val('destinationCompany')||compatible!==true)throw Error('BŁĄD: Firma rozładunku nie przyjmuje tego ładunku. Wybierz firmę z podpowiedzi poniżej.');await api('/api/routes','POST',{driver:val('driverName'),catalogProfile:val('catalogProfile'),fromCountry:val('fromCountry'),from:val('from'),toCountry:val('toCountry'),to:val('to'),sourceCompany:val('sourceCompany'),destinationCompany:val('destinationCompany'),trailerType:val('trailerType'),cargo,cargoTons:Number(val('cargoTons')),plannedKm:Number(val('plannedKm')),freight:Number(val('freight'))});msg('Trasa zapisana w bazie.');await refresh()}catch(e){msg(e.message)}}async function progress(id){try{await api('/api/routes/progress','POST',{id,drivenKm:Number(val('km_'+id)),status:val('status_'+id)});msg('Przebieg zaktualizowany.');await refresh()}catch(e){msg(e.message)}}async function addExpense(){try{await api('/api/expenses','POST',{routeId:val('routeId'),type:val('type'),country:val('country'),from:val('expenseFrom'),to:val('expenseTo'),place:val('place'),liters:Number(val('liters')),amount:Number(val('amount'))});msg('Koszt zapisany w bazie.');await refresh()}catch(e){msg(e.message)}}function normalizeLocation(value){
  return String(value??'').trim().toLocaleLowerCase('pl').normalize('NFD').replace(/\p{Diacritic}/gu,'').replace(/ł/g,'l');
 }
-let catalog=null,profileDepots=[],mapSetDepots=[];
+let catalog=null,profileDepots=[],mapSetDepots=[],cachedCatalog=null;
 function activeCatalog(){
  const profile=$('catalogProfile').value;
- if(profile==='snapshot'){
-  const labels={...catalog?.europe,...catalog?.middleEast,...catalog?.poland};
-  return {cities:Object.fromEntries(mapSetDepots.map(([id])=>[id,labels[id]||[id,'']])),depots:mapSetDepots};
- }
  const poland=profile==='poland',middleEast=$('catalogMiddleEast').checked;
- return {
-  cities:{...catalog?.europe,...(middleEast?catalog?.middleEast:{}),...(poland?catalog?.poland:{})},
-  depots:[...(poland?catalog?.polandDepots||[]:[]),...(middleEast?catalog?.middleEastDepots||[]:[])]
- };
+ if(cachedCatalog?.profile===profile&&cachedCatalog.middleEast===middleEast)return cachedCatalog;
+ const labels={...catalog?.europe,...(middleEast||profile==='snapshot'?catalog?.middleEast:{}),...(poland||profile==='snapshot'?catalog?.poland:{})};
+ const cities=profile==='snapshot'?Object.fromEntries(mapSetDepots.map(([id])=>[id,labels[id]||[id,'']])):labels;
+ const depots=profile==='snapshot'?mapSetDepots:[...(poland?catalog?.polandDepots||[]:[]),...(middleEast?catalog?.middleEastDepots||[]:[])];
+ const index=new Map();
+ for(const [id,company] of depots){
+  if(!index.has(id))index.set(id,[]);
+  index.get(id).push(company);
+ }
+ cachedCatalog={profile,middleEast,cities,index};
+ return cachedCatalog;
 }
 let polishNames={cities:{},cargo:{}},cargoTypes=null;
 let companyCargo={};
@@ -86,20 +89,16 @@ function showManualCargo(){
 cargoPicker.addEventListener('change',showManualCargo);
 $('cargo').addEventListener('input',updateCompanySuggestions);
 function destinationCandidates(){
- const {cities,depots}=activeCatalog();
+ const {cities,index}=activeCatalog();
  const city=translatedCity(val('to')),country=normalizeLocation(val('toCountry'));
  if(!city||!country)return null;
  const matching=new Set(Object.entries(cities).filter(([id,[name,countryId]])=>countryMatches(country,countryId)&&(normalizeLocation(id)===city||normalizeLocation(name)===city)).map(([id])=>id));
  const names=new Set();
- const matchedDepots=depots.filter(([id])=>matching.has(id));
- const availableDepots=matchedDepots.length||$('catalogProfile').value==='snapshot'?matchedDepots:profileDepots.filter(([id])=>matching.has(id));
- for(const [,name] of availableDepots)names.add(name);
+ for(const id of matching)for(const name of depotNames(index,id))names.add(name);
  for(const route of routes)if(translatedCity(route.to)===city&&countryMatches(country,normalizeLocation(route.toCountry)))names.add(route.destinationCompany);
  return [...names].filter(Boolean);
 }
-function availableReceivers(cargo){
- return (destinationCandidates()||[]).filter(name=>destinationCompatibility(name,cargo)===true);
-}
+
 function updateCargoSuggestions(){
  const source=val('sourceCompany'),outgoing=outgoingCargo(source);
  const labels=new Map(Object.entries(polishNames.cargo).map(([label,id])=>[id,label]));
@@ -107,10 +106,15 @@ function updateCargoSuggestions(){
  // Unknown companies may use the trailer catalogue, but are not represented as verified ETS2 offers.
  const allIds=[...new Set(Object.values(cargoTypes||{}).flat())];
  const candidates=destinationCandidates();
- const ids=allIds.filter(id=>availableForTrailer(id)&&(!source||!outgoing||outgoing.includes(id))&&(!candidates||availableReceivers(id).length>0));
+ const ids=allIds.filter(id=>availableForTrailer(id)&&(!source||!outgoing||outgoing.includes(id))&&(!candidates||candidates.some(name=>destinationCompatibility(name,id)===true)));
  const options=ids.map(id=>new Option(labels.get(id)||id,id)).sort((a,b)=>a.text.localeCompare(b.text,'pl'));
- cargoPicker.replaceChildren(new Option('Wybierz ładunek',''),...options);
- if(options.some(option=>option.value===previous))cargoPicker.value=previous;
+ if(cargoPicker.options.length!==options.length+1||options.some((option,i)=>{
+  const current=cargoPicker.options[i+1];
+  return current.value!==option.value||current.text!==option.text;
+ })){
+  cargoPicker.replaceChildren(new Option('Wybierz ładunek',''),...options);
+  if(options.some(option=>option.value===previous))cargoPicker.value=previous;
+ }
  cargoPicker.disabled=!options.length;
  $('destinationCompany').disabled=!options.length;
  $('cargo').hidden=true;
@@ -159,31 +163,31 @@ function countryLabel(id){
 }
 function countryMatches(value,id){
  const country=normalizeLocation(value);
- if(!country||!id)return true;
+ if(!country)return true;
+ if(!id)return false;
  if(id==='nireland'&&countryMatches(country,'uk'))return true;
  return [id,countryLabel(id),regionCodes[id],...(id==='uk'?['Wielka Brytania','Anglia']:[])].some(label=>normalizeLocation(label)===country);
+}
+function setSuggestions(id,names){
+ const list=$(id);
+ if(list.options.length===names.length&&names.every((name,i)=>list.options[i].value===name))return;
+ list.replaceChildren(...names.map(name=>new Option(name,name)));
 }
 function updateCitySuggestions(){
  const {cities}=activeCatalog();
  for(const [field,list] of [['fromCountry','fromCities'],['toCountry','toCities']]){
-  const available=Object.entries(cities).filter(([,data])=>countryMatches(val(field),data[1]));
+  const country=val(field);
+  const available=Object.entries(cities).filter(([,data])=>countryMatches(country,data[1]));
   const ids=new Set(available.map(([id])=>id));
   const names=[...new Set([...available.map(([,data])=>data[0]),...Object.entries(polishNames.cities).filter(([,id])=>ids.has(id)).map(([name])=>name)])];
-  const term=normalizeLocation(val(field==='fromCountry'?'from':'to'));
-  $(list).replaceChildren(...names.filter(name=>!term||normalizeLocation(name).includes(term)).sort((a,b)=>a.localeCompare(b,'pl')).map(name=>new Option(name,name)));
+  setSuggestions(list,names.sort((a,b)=>a.localeCompare(b,'pl')));
  }
 }
-for(const id of ['from','to'])$(id).addEventListener('input',()=>{updateCitySuggestions();if(id==='to')updateCargoSuggestions();});
-function updateCountrySuggestions(){
+function updateCatalog(){
+ cachedCatalog=null;
  const {cities}=activeCatalog();
  const countries=[...new Set(Object.values(cities).map(([,country])=>countryLabel(country)).filter(Boolean))];
- const focused=document.activeElement;
- const term=focused?.id==='fromCountry'||focused?.id==='toCountry'?normalizeLocation(focused.value):'';
- $('catalogCountries').replaceChildren(...countries.filter(name=>!term||normalizeLocation(name).includes(term)).sort((a,b)=>a.localeCompare(b,'pl')).map(name=>new Option(name,name)));
-}
-for(const id of ['fromCountry','toCountry'])$(id).addEventListener('input',()=>{updateCountrySuggestions();updateCitySuggestions();if(id==='toCountry')updateCargoSuggestions();});
-function updateCatalog(){
- updateCountrySuggestions();
+ setSuggestions('catalogCountries',countries.sort((a,b)=>a.localeCompare(b,'pl')));
  updateCitySuggestions();
  updateCargoSuggestions();
 }
@@ -196,16 +200,28 @@ fetch('/ets2-profile-depots.json').then(response=>{
  if(!response.ok)throw Error('Katalog firm jest niedostępny.');
  return response.json();
 }).then(data=>{profileDepots=data;updateCatalog()}).catch(error=>msg(error.message));
-Promise.all(Array.from({length:24},(_,i)=>fetch('/ets2-mapset-nowaczyk-'+i+'.json').then(response=>{
- if(!response.ok)throw Error('Firmy z mapy Nowaczyk są niedostępne.');
- return response.json();
-}))).then(parts=>{
+async function loadMapPart(index){
+ const url='/ets2-mapset-nowaczyk-'+index+'.json';
+ for(let attempt=0;attempt<2;attempt++){
+  try{
+   const response=await fetch(url,attempt?{cache:'reload'}:undefined);
+   if(!response.ok)throw Error('HTTP '+response.status);
+   return await response.json();
+  }catch(error){if(attempt)throw error}
+ }
+}
+Promise.allSettled(Array.from({length:24},(_,i)=>loadMapPart(i))).then(results=>{
+ const parts=results.filter(result=>result.status==='fulfilled').map(result=>result.value);
  mapSetDepots=Object.entries(Object.assign({},...parts)).flatMap(([city,companies])=>Object.keys(companies).map(company=>[city,company]));
  updateCatalog();
-}).catch(error=>msg(error.message));
+ if(parts.length!==results.length)msg('Wczytano tylko część firm z mapy Nowaczyk. Odśwież stronę, aby spróbować ponownie.');
+});
+function depotNames(index,id){
+ return index.get(id)||($('catalogProfile').value==='snapshot'?[]:profileDepots.filter(([city])=>city===id).map(([,name])=>name));
+}
 function updateCompanySuggestions(){
  const cargo=selectedCargo();
- const {cities,depots}=activeCatalog();
+ const {cities,index}=activeCatalog();
  const known=routes.flatMap(route=>[
   [route.fromCountry,route.from,route.sourceCompany],
   [route.toCountry,route.to,route.destinationCompany]
@@ -222,20 +238,27 @@ function updateCompanySuggestions(){
   }
   const matches=Object.entries(cities).filter(([id,[name,countryId]])=>city&&countryMatches(country,countryId)&&(normalizeLocation(id)===city||normalizeLocation(name)===city));
   for(const [cityId] of matches){
-   const selectedDepots=depots.filter(([id])=>id===cityId);
-   const availableDepots=selectedDepots.length||$('catalogProfile').value==='snapshot'?selectedDepots:profileDepots.filter(([id])=>id===cityId);
-   for(const [,company] of availableDepots)names.set(normalizeLocation(company),company);
+   for(const company of depotNames(index,cityId))names.set(normalizeLocation(company),company);
   }
   const options=[...names.values()].filter(name=>{
    if(cityField==='to')return Boolean(cargo)&&destinationCompatibility(name,cargo)===true;
    return true;
   }).sort((x,y)=>x.localeCompare(y,'pl'));
-  select.replaceChildren(new Option(placeholder,''),...options.map(name=>new Option(name,name)));
-  if(options.includes(previous))select.value=previous;
+  if(select.options.length!==options.length+1||options.some((name,i)=>select.options[i+1].value!==name)){
+   select.replaceChildren(new Option(placeholder,''),...options.map(name=>new Option(name,name)));
+   if(options.includes(previous))select.value=previous;
+  }
   if(cityField==='from'&&select.value!==previous)updateCargoSuggestions();
  }
  const recipients=Object.entries(companyCargo).filter(([,data])=>data.in?.includes(cargo)).map(([name])=>name);$('destinationHint').textContent=!cargo?'Najpierw wybierz ładunek.':$('destinationCompany').options.length===1?'BŁĄD: W wybranym mieście brak odbiorcy tego towaru. Przykładowe zgodne firmy w katalogu: '+(recipients.slice(0,6).join(', ')||'brak')+'. Zmień miasto lub towar.':'Wybierz firmę z listy odbiorców. Dostępność konkretnej oferty w ETS2 zależy od gry.';
 }
-for(const field of ['from','to'])$(field).addEventListener('input',updateCompanySuggestions);
-for(const field of ['fromCountry','toCountry'])$(field).addEventListener('input',()=>{updateCitySuggestions();updateCompanySuggestions()});
+for(const [city,country] of [['from','fromCountry'],['to','toCountry']]){
+ $(city).addEventListener('focus',updateCitySuggestions);
+ $(city).addEventListener('input',city==='to'?updateCargoSuggestions:updateCompanySuggestions);
+ $(country).addEventListener('input',()=>{
+  updateCitySuggestions();
+  if(city==='to')updateCargoSuggestions();
+  else updateCompanySuggestions();
+ });
+}
 boot();</script></html>
