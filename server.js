@@ -478,7 +478,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!account?.active||!(['admin','driver','probation'].includes(account.role)||(account.role==='boss'&&account.companyId===MAIN_COMPANY_ID)))return send(res,400,{error:'Wybierz aktywne konto z listy kierowców'});
   const plannedKm=Number(a.plannedKm);
   if(!Number.isFinite(plannedKm)||plannedKm<0||plannedKm>20000)return send(res,400,{error:'Nieprawidłowy dystans'});
-  const freightInput=a.freight===undefined||a.freight===null||a.freight===''?null:Number(a.freight);const freight=freightInput===null||freightInput===0?quoteFreight(plannedKm,a.cargo,a.cargoTons,a.trailerType):freightInput;if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
+  const freight=quoteFreight(plannedKm,a.cargo,a.cargoTons,a.trailerType);if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
   if(!Number.isFinite(Number(a.cargoTons||0))||Number(a.cargoTons||0)<0||Number(a.cargoTons||0)>100)return send(res,400,{error:'Nieprawidłowa masa ładunku'});
   const trailerType=str(a.trailerType,20);
   if(trailerType&&!['firanka','chlodnia'].includes(trailerType))return send(res,400,{error:'Wybierz plandekę lub chłodnię.'});
