@@ -25,6 +25,9 @@ article strong{font-size:27px}
 <div class="grid">
 <article><h2>Przejechane kilometry</h2><strong id="km">—</strong></article>
 <article><h2>Dostawy</h2><strong id="deliveries">—</strong></article>
+<article><h2>Zarobek firmy z dostaw</h2><strong id="revenue">—</strong></article>
+<article><h2>Wypłaty kierowców</h2><strong id="driverPayments">—</strong></article>
+<article><h2>Do wypłaty za kursy</h2><strong id="pendingDriverPay">—</strong></article>
 <article><h2>Otwarte zlecenia</h2><strong id="openRoutes">—</strong></article>
 <article><h2>Kierowcy online</h2><strong id="online">—</strong></article>
 <article><h2>Pojazdy w firmie</h2><strong id="vehicles">—</strong></article>
@@ -41,6 +44,7 @@ async function refresh(){
   for(const key of fields)document.getElementById(key).textContent=data[key].toLocaleString('pl-PL');
   document.getElementById('km').textContent=data.km.toLocaleString('pl-PL')+' km';
   document.getElementById('online').textContent=data.online+' / '+data.drivers;
+  for(const key of ['revenue','driverPayments','pendingDriverPay'])document.getElementById(key).textContent=Number(data[key]||0).toLocaleString('pl-PL',{style:'currency',currency:'PLN'});
   status.textContent='Dane z zapisanych zleceń i bieżącej telemetrii.';
  }catch(error){status.textContent=error.message}
  setTimeout(refresh,15000);
