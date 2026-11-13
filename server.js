@@ -148,7 +148,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const key=sessionKey(req);
  req[requestSession]=key?db.authSessions?.[key]:null;
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&
-    !(method==='GET'&&u.pathname==='/api/fleet/positions')&&
+    !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
     !['/api/accounts/me','/api/accounts/login','/api/accounts/password','/api/logout','/api/admin/applications','/api/companies','/api/me'].includes(u.pathname)){
   return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji i mapy własnej firmy.'});
  }
@@ -196,7 +196,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,200,{driver:me.username,companyId,km:Math.round(routes.reduce((n,r)=>n+(Number(r.drivenKm)||0),0)*10)/10,completedKm:Math.round(completed.reduce((n,r)=>n+(Number(r.drivenKm)||0),0)*10)/10,completedRoutes:completed.length,allRoutes:routes.length,source:'server',updatedAt:new Date().toISOString()});
  }
  if(u.pathname==='/api/company/summary'&&method==='GET'){
-  if(!canDispatch(req))return send(res,403,{error:'Tylko kierownictwo i dyspozytorzy'});
+  if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Tylko kierownictwo i dyspozytorzy'});
   const companyId=who(req).companyId||MAIN_COMPANY_ID;
   const routes=(db.routes||[]).filter(route=>route.companyId===companyId);
   const completed=routes.filter(route=>route.settledAt||route.deliveredAt||route.status==='Zakończona');
@@ -204,6 +204,17 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const paid=roundPLN((db.payments||[]).filter(p=>routes.some(r=>r.driver.toLowerCase()===p.driver)).reduce((sum,p)=>sum+Number(p.amount||0),0));
   const drivers=[...accounts.values()].filter(account=>account.active&&account.companyId===companyId&&['driver','probation'].includes(account.role));
   const now=Date.now();
+  if(isSubcontractorBoss(req))return send(res,200,{
+   companyName:db.companies.find(company=>company.id===companyId)?.name||companyId,
+   km:Math.round(routes.reduce((sum,route)=>sum+(Number(route.drivenKm)||0),0)*10)/10,
+   completedRoutes:completed.length,
+   openRoutes:routes.length-completed.length,
+   drivers:drivers.length,
+   online:drivers.filter(account=>{
+    const position=db.fleetPositions?.[account.username.toLowerCase()];
+    return position?.companyId===companyId&&now-Date.parse(position.updatedAt)<45000;
+   }).length
+  });
   return send(res,200,{
    km:Math.round(routes.reduce((sum,route)=>sum+(Number(route.drivenKm)||0),0)*10)/10,
    deliveries:completed.length,
@@ -230,6 +241,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const key=account.username.toLowerCase();
    if(account.active&&['driver','probation'].includes(account.role)&&!Object.hasOwn(reports,key))reports[key]={driver:account.username,companyId:account.companyId};
   }
+  const companyNames=new Map(db.companies.map(company=>[company.id,company.name]));
   const positions=Object.values(reports).filter(p=>{
    if(!companyScope)return true;
    const account=accounts.get(p.driver.toLowerCase());
@@ -239,7 +251,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const inProgress=candidates.filter(r=>r.status==='W trasie');
    const route=inProgress.length===1?inProgress[0]:candidates.length===1?candidates[0]:null;
    const delivery=deliveries.get(p.driver.toLowerCase());
-   return {...p,online:now-Date.parse(p.updatedAt)<45000,dispatchRoute:route?{from:route.from,to:route.to}:null,lastDelivery:delivery?{city:delivery.telemetry.destinationCity,company:delivery.telemetry.destinationCompany}:null};
+   const account=accounts.get(p.driver.toLowerCase());
+   const companyId=account?.companyId||p.companyId;
+   return {...p,companyId,companyName:companyNames.get(companyId)||companyId,online:now-Date.parse(p.updatedAt)<45000,dispatchRoute:route?{from:route.from,to:route.to}:null,lastDelivery:delivery?{city:delivery.telemetry.destinationCity,company:delivery.telemetry.destinationCompany}:null};
 
   });
   return send(res,200,{positions,source:'telemetry-client',gameMapReady:false});

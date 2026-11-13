@@ -74,6 +74,13 @@ test('login → dispatch → nested export → telemetry → driver panel and de
   const map=await req('/api/fleet/positions',null,bossSession.cookie);
   assert.equal(map.status,200);
   assert.deepEqual(map.data.positions.map(p=>p.driver),['subdriver']);
+  assert.equal(map.data.positions[0].companyName,'Podwykonawca');
+  const summary=await req('/api/company/summary?companyId=nowaczyk',null,bossSession.cookie);
+  assert.equal(summary.status,200);
+  assert.equal(summary.data.companyName,'Podwykonawca');
+  assert.equal(summary.data.drivers,1);
+  assert.equal(summary.data.online,1);
+  assert.equal(summary.data.revenue,undefined);
   assert.equal(map.data.positions[0].x,55);
   assert.equal((await fetch(base+'/centrum-floty.html',{headers:{Cookie:bossSession.cookie}})).status,200);
   assert.equal((await req('/api/accounts',companyDriver,bossSession.cookie)).status,403);

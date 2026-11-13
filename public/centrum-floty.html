@@ -10,7 +10,7 @@
 .city-label.leaflet-tooltip{background:#132033e8;border:0;color:#fff;font-weight:600;padding:2px 4px;box-shadow:none}
 .parking-pin{background:#2662a0;border:1px solid white;border-radius:3px;color:white;text-align:center;font:bold 11px/14px Arial}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"><main><a href="/">← Panel Nowaczyk Transport</a><h1>Centrum floty</h1><p class="muted">Pozycje i statusy kierowców z telemetrii ETS2.</p><div class="panel"><h2>Pozycje pojazdów</h2><p id="state" class="muted">Ładowanie…</p>
-<div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Pozycja</th><th>Ładunek</th><th>Prędkość</th><th>Trasa</th><th>Ostatnia dostawa</th></tr></thead><tbody id="rows"></tbody></table></div></div><section class="panel" id="mapPanel">
+<div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Firma</th><th>Status</th><th>Pozycja</th><th>Ładunek</th><th>Prędkość</th><th>Trasa</th><th>Ostatnia dostawa</th></tr></thead><tbody id="rows"></tbody></table></div></div><section class="panel" id="mapPanel">
 <h2>Mapa kierowców</h2><p class="muted">Domyślnie pełny podkład ProMods 2.68. W menu warstw jest też podgląd 2.83 z miastami i parkingami. W podglądzie brakuje geometrii niektórych skrzyżowań.</p>
 <div class="fleet-map-tools"><label>Kierowca <select id="mapDriver"><option value="">Wybierz kierowcę</option></select></label><button id="fullscreen" type="button">Pełny ekran</button><span id="mapStatus" class="muted" role="status"></span></div>
 <p id="mapError" class="muted" role="status" hidden></p>
@@ -148,7 +148,7 @@ function drivingTime(p){
 }
 function markerLabel(p){
  const moving=p.online&&p.speedKmh>=3&&p.activity!=='Gra wstrzymana';
- return [p.driver,driverState(p),routeLabel(p),moving?p.speedKmh+' km/h · jedzie od '+drivingTime(p):''].filter(Boolean).join(' · ');
+ return [p.driver,p.companyName,driverState(p),routeLabel(p),moving?p.speedKmh+' km/h · jedzie od '+drivingTime(p):''].filter(Boolean).join(' · ');
 }
 function updateMap(positions){
  latestPositions=positions;
@@ -231,7 +231,7 @@ async function refresh(){
    const delivery=p.lastDelivery?[p.lastDelivery.city,p.lastDelivery.company].filter(Boolean).join(' · '):'Brak danych';
    const cargo=p.online&&p.cargo?p.cargo+(p.cargoMassKg?' · '+(p.cargoMassKg/1000).toLocaleString('pl-PL')+' t':''):'—';
    const speed=p.online&&p.activity!=='Gra wstrzymana'&&p.speedKmh>=3?p.speedKmh+' km/h':'—';
-   return '<tr>'+[p.driver,driverState(p),locationLabel(p),cargo,speed,route,delivery].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>';
+   return '<tr>'+[p.driver,p.companyName,driverState(p),locationLabel(p),cargo,speed,route,delivery].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>';
   }).join('');
  }catch(error){$('state').textContent=error.message}
 }
