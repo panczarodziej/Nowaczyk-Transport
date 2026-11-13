@@ -63,7 +63,7 @@ function baseUrl(){const u=new URL(settings().server);if(u.protocol!=='https:' &
 async function driverRequest(endpoint,options={}){
  const origin=baseUrl();const cookies=await driverSession().cookies.get({url:origin});const authCookie=cookies.find(c=>c.name==='ks_session');
  if(!authCookie)return {ok:false,error:'Zaloguj się w panelu kierowcy'};
- const r=await fetch(origin+endpoint,{...options,headers:{'Content-Type':'application/json',Cookie:'ks_session='+authCookie.value,...(desktopAuth?.origin===origin&&desktopAuth.cookie===authCookie.value?{'X-Nowaczyk-Desktop-Token':desktopAuth.token}:{}),...options.headers},signal:AbortSignal.timeout(9000)});
+ const r=await fetch(origin+endpoint,{...options,headers:{'Content-Type':'application/json',Cookie:'ks_session='+authCookie.value,...(desktopAuth?.origin===origin&&desktopAuth.cookie===authCookie.value?{'X-Nowaczyk-Desktop-Token':desktopAuth.token}:{}),...options.headers},signal:AbortSignal.timeout(30000)});
  const data=await r.json().catch(()=>({}));return {ok:r.ok,status:r.status,...data};
 }
 async function openDriverPanel(){
@@ -76,7 +76,16 @@ async function openDriverPanel(){
 }
 async function syncTelemetry(){
  if(syncInProgress)return {ok:false,error:"Synchronizacja już trwa"};
- syncInProgress=true;try{return await syncTelemetryInner()}finally{syncInProgress=false}
+ syncInProgress=true;
+ try{
+  const result=await syncTelemetryInner();
+  syncInfo={...result,at:new Date().toISOString()};
+  return result;
+ }catch(error){
+  const message=error.name==='TimeoutError'?'Serwer nie odpowiedział w 30 sekund. Automatyczna synchronizacja ponowi próbę.':error.message;
+  syncInfo={ok:false,error:message,at:new Date().toISOString()};
+  return syncInfo;
+ }finally{syncInProgress=false}
 }
 async function syncTelemetryInner(){
  const account=await driverRequest('/api/accounts/me');captureDriver=account.user?.username?.toLowerCase()||null;if(!captureDriver)return {ok:false,error:'Zaloguj się w panelu kierowcy'};
@@ -90,7 +99,7 @@ async function syncTelemetryInner(){
    if(!reply.ok)break;pendingEvents.splice(pendingEvents.indexOf(ev),1);persistEvents();sentEvents++;
   }catch{break}
  }
- const outcome=result.ok?{ok:true,driver:result.position?.driver,verified:false,sentEvents}:{...result,sentEvents};syncInfo={...outcome,at:new Date().toISOString()};return outcome;
+ const outcome=result.ok?{ok:true,driver:result.position?.driver,verified:false,sentEvents}:{...result,sentEvents};return outcome;
 }
 function create(){const s=settings();win=new BrowserWindow({width:680,height:650,minWidth:560,minHeight:500,show:false,icon:path.join(__dirname,'icon.png'),webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false}});win.loadFile('ui.html');win.once('ready-to-show',()=>{if(!((process.argv.includes('--minimized')||s.startMinimized)&&app.getLoginItemSettings().wasOpenedAtLogin))win.show()});win.on('close',e=>{if(!app.isQuitting){e.preventDefault();win.hide()}});
  // Ikona zasobnika generowana w kodzie, bez pobierania z internetu.

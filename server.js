@@ -117,7 +117,16 @@ function revokeAccountSessions(db,id){
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
 function canDispatch(req){return ['admin','dispatcher','boss'].includes(who(req)?.role)}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
-function body(req){return new Promise((resolve,reject)=>{let s='';req.on('data',b=>{s+=b;if(s.length>150000)req.destroy()});req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch{reject(new Error('Niepoprawny JSON'))}});req.on('error',reject)})}
+function body(req){
+ return new Promise((resolve,reject)=>{
+  if(req.destroyed&&!req.readableEnded)return reject(new Error('Połączenie zamknięte przed odebraniem żądania'));
+  let s='';
+  req.on('data',b=>{s+=b;if(s.length>150000)req.destroy()});
+  req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch{reject(new Error('Niepoprawny JSON'))}});
+  req.on('error',reject);
+  req.on('close',()=>{if(!req.readableEnded)reject(new Error('Przerwano odbieranie żądania'))});
+ });
+}
 // Orientacyjne stawki wirtualnej spedycji PLN/km, bez podatku VAT.
 const roundPLN=n=>Math.round(n*100)/100;
 function quoteFreight(km,cargo,tons,trailerType){
@@ -731,5 +740,5 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const fleetMapPolicy="; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css; img-src 'self' data: https://map.charlws.com/ets2/promods/tiles/";
  const policy=basePolicy+(file==='centrum-floty.html'?fleetMapPolicy:'');
  res.writeHead(200,{'Content-Type':mime[path.extname(full)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Content-Security-Policy':policy});fs.createReadStream(full).pipe(res);
-}catch(e){console.error(e);if(!res.headersSent)send(res,500,{error:'Błąd serwera'})}finally{release?.()}});
+}catch(e){if(res.destroyed)return;console.error(e);if(!res.headersSent)send(res,500,{error:'Błąd serwera'})}finally{release?.()}});
 initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT))).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
