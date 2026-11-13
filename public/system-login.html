@@ -17,7 +17,7 @@ a{color:#12568c;text-decoration:none}
  try{
   const response=await fetch('/api/accounts/me',{cache:'no-store'});
   const {user}=await response.json();
-  if(user&&['admin','boss','dispatcher','driver','probation'].includes(user.role))location.replace('/');
+  if(user&&['admin','boss','dispatcher','driver','probation','subcontractor'].includes(user.role))location.replace('/');
  }catch{}
 });
 </script></body></html>

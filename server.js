@@ -115,7 +115,7 @@ function revokeAccountSessions(db,id){
  }
 }
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
-function isSubcontractorBoss(req){const me=who(req);return me?.role==='boss'&&me.companyId!==MAIN_COMPANY_ID}
+function isSubcontractorBoss(req){const me=who(req);return me?.role==='subcontractor'||(me?.role==='boss'&&me.companyId!==MAIN_COMPANY_ID)}
 function canDispatch(req){const me=who(req);return auth(req)||me?.role==='dispatcher'||(me?.role==='driver'&&me.dispatchAccess===true)}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
 function body(req){
@@ -148,8 +148,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const key=sessionKey(req);
  req[requestSession]=key?db.authSessions?.[key]:null;
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&
+    !(method==='GET'&&u.pathname==='/api/fleet/positions')&&
     !['/api/accounts/me','/api/accounts/login','/api/accounts/password','/api/logout','/api/admin/applications','/api/companies','/api/me'].includes(u.pathname)){
-  return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji własnej firmy.'});
+  return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji i mapy własnej firmy.'});
  }
 
  // Centrum floty: dane pozycji z uwierzytelnionego konta; NIE jest to jeszcze integracja z ETS2.
@@ -217,18 +218,23 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   });
  }
  if(u.pathname==='/api/fleet/positions'&&method==='GET'){
-  if(!canDispatch(req))return send(res,403,{error:'Tylko administrator lub dyspozytor'});
+  const companyScope=isSubcontractorBoss(req)?who(req).companyId:null;
+  if(!canDispatch(req)&&!companyScope)return send(res,403,{error:'Brak dostępu do mapy kierowców'});
   const now=Date.now();
   const deliveries=new Map();
   for(const event of db.telemetryEvents||[]){
-   if(event.type==='job-delivered'&&event.telemetry?.destinationCity)deliveries.set(event.driver.toLowerCase(),event);
+   if((!companyScope||event.companyId===companyScope)&&event.type==='job-delivered'&&event.telemetry?.destinationCity)deliveries.set(event.driver.toLowerCase(),event);
   }
   const reports={...db.fleetPositions};
   for(const account of accounts.values()){
    const key=account.username.toLowerCase();
    if(account.active&&['driver','probation'].includes(account.role)&&!Object.hasOwn(reports,key))reports[key]={driver:account.username,companyId:account.companyId};
   }
-  const positions=Object.values(reports).map(p=>{
+  const positions=Object.values(reports).filter(p=>{
+   if(!companyScope)return true;
+   const account=accounts.get(p.driver.toLowerCase());
+   return p.companyId===companyScope&&account?.companyId===companyScope&&account.active&&['driver','probation'].includes(account.role);
+  }).map(p=>{
    const candidates=(db.routes||[]).filter(r=>r.driver?.toLowerCase()===p.driver.toLowerCase()&&r.companyId===p.companyId&&r.acceptedAt&&!r.deliveredAt&&['Przyjęta','W trasie'].includes(r.status));
    const inProgress=candidates.filter(r=>r.status==='W trasie');
    const route=inProgress.length===1?inProgress[0]:candidates.length===1?candidates[0]:null;
@@ -693,6 +699,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const a=await body(req),username=str(a.username,50),pass=str(a.password,300),role=str(a.role,40),companyId=str(a.companyId,80)||MAIN_COMPANY_ID;
   if(!/^[a-zA-Z0-9._-]{3,50}$/.test(username)||pass.length<12||!ROLES.includes(role))return send(res,400,{error:'Login: 3–50 znaków, hasło min. 12 znaków, poprawna rola'});
   if(role==='admin'&&who(req).role!=='admin')return send(res,403,{error:'Tylko administrator może utworzyć konto administratora'});
+  if(!db.companies.some(company=>company.id===companyId))return send(res,400,{error:'Wybierz istniejącą firmę.'});
+  if(role==='subcontractor'&&companyId===MAIN_COMPANY_ID)return send(res,400,{error:'Wybierz firmę podwykonawcy.'});
   if(accounts.has(username.toLowerCase()))return send(res,409,{error:'Login zajęty'});
   const acct={id:crypto.randomUUID(),username,role,dispatchAccess:role==='driver'&&a.dispatchAccess===true,companyId,active:true,...passwordHash(pass)};
   accounts.set(username.toLowerCase(),acct);db.accounts=[...accounts.values()];await save(db);return send(res,201,safeAccount(acct));
@@ -704,6 +712,12 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(who(req).role!=='admin'&&(acct.role==='admin'||a.role==='admin'))return send(res,403,{error:'Tylko administrator może zarządzać kontami administratorów'});
   if(a.active===false&&(acct.role==='admin'||acct.id===who(req).id))return send(res,400,{error:'Nie można zablokować administratora ani własnego konta'});
   if(a.password!==undefined&&(typeof a.password!=='string'||a.password.length<12||a.password.length>300))return send(res,400,{error:'Hasło min. 12 znaków'});
+  if(a.companyId!==undefined){
+   const companyId=str(a.companyId,80);
+   if(!db.companies.some(company=>company.id===companyId))return send(res,400,{error:'Wybierz istniejącą firmę.'});
+   if(a.role!==undefined||['admin','boss','subcontractor'].includes(acct.role))return send(res,403,{error:'Przeniesienie firmy jest dostępne dla kont pracowników.'});
+   acct.companyId=companyId;
+  }
   if(typeof a.active==='boolean')acct.active=a.active;
   if(a.password!==undefined)Object.assign(acct,passwordHash(a.password));
   if(a.role!==undefined&&ROLES.includes(a.role)&&acct.role!=='admin')acct.role=a.role;
@@ -749,7 +763,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   }
   if(u.pathname==='/api/admin/companies'&&method==='POST'){
    const a=await body(req),name=str(a.name,90);if(name.length<2)return send(res,400,{error:'Podaj nazwę firmy'});
-   const x={id:crypto.randomUUID(),name,bases:[str(a.city,90)||'Nie podano'],open:true,logo:''};db.companies.push(x);await save(db);return send(res,201,x);
+   const id=str(a.id,80)||crypto.randomUUID();
+   if(id.toLowerCase()===LEGACY_COMPANY_ID||id.toLowerCase()===MAIN_COMPANY_ID||db.companies.some(company=>company.id.toLowerCase()===id.toLowerCase()))return send(res,409,{error:'Identyfikator firmy jest zajęty.'});
+   const x={id,name,bases:[str(a.city,90)||'Nie podano'],open:true,logo:''};db.companies.push(x);await save(db);return send(res,201,x);
   }
   if(u.pathname==='/api/admin/companies'&&method==='PATCH'){
    const a=await body(req),x=db.companies.find(c=>c.id===a.id);if(!x)return send(res,404,{error:'Brak firmy'});
@@ -769,7 +785,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(who(req))return send(res,403,{error:'Panel rekrutacji jest dostępny dla kierownictwa.'});
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
  }
- if(u.pathname==='/centrum-floty.html'&&!canDispatch(req)){
+ if(u.pathname==='/centrum-floty.html'&&!canDispatch(req)&&!isSubcontractorBoss(req)){
   if(who(req))return send(res,403,{error:'Mapa floty jest dostępna dla dyspozytorni.'});
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
  }

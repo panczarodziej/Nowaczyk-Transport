@@ -53,7 +53,7 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/accounts',null,dispatcher.cookie)).status,200);
  assert.equal((await fetch(base+'/system.html',{headers:{Cookie:dispatcher.cookie}})).status,200);
  assert.equal((await req('/api/accounts/update',{username:'admin',password:'another-password'},dispatcher.cookie)).status,403);
- const company=await req('/api/admin/companies',{name:'Podwykonawca'},admin.cookie);
+ const company=await req('/api/admin/companies',{name:'Podwykonawca',id:'Moja firma 7'},admin.cookie);
  assert.equal(company.status,201);
  const subAccount={username:'subboss',password:'subboss-password-only',role:'boss',companyId:company.data.id};
  assert.equal((await req('/api/accounts',subAccount,dispatcher.cookie)).status,201);
@@ -62,6 +62,22 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  const own=await req('/api/applications',{...application,companyId:company.data.id});
  const foreign=await req('/api/applications',{...application,companyId:'nowaczyk'});
  assert.equal((await req('/api/accounts',subAccount,sub.cookie)).status,403);
+ assert.equal(company.data.id,'Moja firma 7');
+ const explicitBoss={...subAccount,username:'subboss2',role:'subcontractor'};
+ assert.equal((await req('/api/accounts',explicitBoss,dispatcher.cookie)).status,201);
+ const explicitLogin=await req('/api/accounts/login',{username:explicitBoss.username,password:explicitBoss.password});
+ const companyDriver={username:'subdriver',password:'subdriver-password-only',role:'driver',companyId:company.data.id};
+ assert.equal((await req('/api/accounts',companyDriver,dispatcher.cookie)).status,201);
+ const subDriver=await req('/api/accounts/login',{username:companyDriver.username,password:companyDriver.password});
+ assert.equal((await req('/api/fleet/position',{x:55,z:66,speedKmh:50},subDriver.cookie)).status,200);
+ for(const bossSession of [sub,explicitLogin]){
+  const map=await req('/api/fleet/positions',null,bossSession.cookie);
+  assert.equal(map.status,200);
+  assert.deepEqual(map.data.positions.map(p=>p.driver),['subdriver']);
+  assert.equal(map.data.positions[0].x,55);
+  assert.equal((await fetch(base+'/centrum-floty.html',{headers:{Cookie:bossSession.cookie}})).status,200);
+  assert.equal((await req('/api/accounts',companyDriver,bossSession.cookie)).status,403);
+ }
  assert.equal((await req('/api/routes',null,sub.cookie)).status,403);
  assert.equal((await fetch(base+'/admin.html',{headers:{Cookie:sub.cookie}})).status,200);
  assert.deepEqual((await req('/api/admin/applications',null,sub.cookie)).data.map(a=>a.id),[own.data.id]);
