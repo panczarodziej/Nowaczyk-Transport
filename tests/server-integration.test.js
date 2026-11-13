@@ -55,6 +55,16 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/accounts/update',{username:'admin',password:'another-password'},dispatcher.cookie)).status,403);
  const company=await req('/api/admin/companies',{name:'Podwykonawca',id:'Moja firma 7'},admin.cookie);
  assert.equal(company.status,201);
+ const budget={companyId:company.data.id,amount:'500.25',confirm:true};
+ for(const cookie of [admin.cookie,dispatcher.cookie,login.cookie]){
+  assert.equal((await req('/api/budgets',budget,cookie)).status,403);
+ }
+ const ownerAccount={username:'kcvper',password:'budget-owner-password',role:'boss'};
+ assert.equal((await req('/api/accounts',ownerAccount,admin.cookie)).status,201);
+ const owner=await req('/api/accounts/login',{username:ownerAccount.username,password:ownerAccount.password});
+ assert.equal((await req('/api/budgets',null,owner.cookie)).data.find(b=>b.companyId===company.data.id).canSetInitialBudget,true);
+ assert.equal((await req('/api/budgets',budget,owner.cookie)).data.initialCents,50025);
+ assert.equal((await req('/api/budgets',budget,owner.cookie)).status,409);
  const subAccount={username:'subboss',password:'subboss-password-only',role:'boss',companyId:company.data.id};
  assert.equal((await req('/api/accounts',subAccount,dispatcher.cookie)).status,201);
  const sub=await req('/api/accounts/login',{username:subAccount.username,password:subAccount.password});

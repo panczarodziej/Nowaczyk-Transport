@@ -115,6 +115,10 @@ function revokeAccountSessions(db,id){
  }
 }
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
+function canSetInitialBudget(req,companyId){
+ const me=who(req);
+ return auth(req)&&(companyId===MAIN_COMPANY_ID||me.username.toLowerCase()==='kcvper');
+}
 function isSubcontractorBoss(req){const me=who(req);return me?.role==='subcontractor'||(me?.role==='boss'&&me.companyId!==MAIN_COMPANY_ID)}
 function canDispatch(req){const me=who(req);return auth(req)||me?.role==='dispatcher'||(me?.role==='driver'&&me.dispatchAccess===true)}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
@@ -331,13 +335,14 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   else entries=Object.entries(db.initialBudgets||{}).map(([companyId,x])=>({companyId,...x}));
   const budgets=(db.companies||[]).map(c=>{
    const b=entries.find(x=>x.companyId===c.id),income=(db.ledger||[]).filter(x=>x.companyId===c.id).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0),costs=(db.expenses||[]).filter(x=>{const r=(db.routes||[]).find(r=>r.id===x.routeId);return (x.companyId||r?.companyId||MAIN_COMPANY_ID)===c.id}).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
-   return {companyId:c.id,name:c.name,locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b?b.initialCents+income-costs:null};
+   return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id),locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b?b.initialCents+income-costs:null};
   });return send(res,200,budgets);
  }
  if(u.pathname==='/api/budgets'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),companyId=str(a.companyId,80),amount=a.amount;
   if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Nie znaleziono firmy'});
+  if(!canSetInitialBudget(req,companyId))return send(res,403,{error:'Budżet startowy podwykonawcy może nadać tylko kcvper.'});
   if(typeof amount!=='string'||! /^(0|[1-9]\d{0,11})(?:\.\d{1,2})?$/.test(amount))return send(res,400,{error:'Wpisz poprawną kwotę w PLN (maks. 2 miejsca po przecinku)'});
   const [whole,frac='']=amount.split('.');const cents=Number(whole)*100+Number(frac.padEnd(2,'0'));
   if(!Number.isSafeInteger(cents)||a.confirm!==true)return send(res,400,{error:'Potwierdź nieodwracalne ustawienie kwoty'});
