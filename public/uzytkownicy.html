@@ -72,7 +72,7 @@ if(['driver','probation'].includes(x.role)){
  };
  companyCell.replaceChildren(select);
 }cell(x.active?'Aktywne':'Zablokowane');const td=document.createElement('td');if(x.role!=='admin'){const b=document.createElement('button');b.textContent=x.active?'Zablokuj':'Odblokuj';b.onclick=async()=>{try{await api('/api/accounts/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:x.username,active:!x.active})});refresh()}catch(e){msg.textContent=e.message}};td.append(b)}
-if(x.role==='driver'){
+if(['driver','probation'].includes(x.role)){
  const toggle=document.createElement('button');
  toggle.textContent=x.dispatchAccess?'Usuń rolę Dyspozytor':'Dodaj rolę Dyspozytor';
  toggle.onclick=async()=>{

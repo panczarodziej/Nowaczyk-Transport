@@ -137,6 +137,14 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/trailers',null,admin.cookie)).data.trailers.filter(t=>t.assigneeId===boss.id).length,2);
  assert.equal((await req('/api/routes',route)).status,401);
  assert.equal((await req('/api/routes',route,login.cookie)).status,403);
+ assert.equal((await req('/api/routes',route,admin.cookie)).status,403);
+ const trainee={...route,driver:'subdriver'};
+ assert.equal((await req('/api/accounts/update',{username:trainee.driver,role:'probation',dispatchAccess:true},admin.cookie)).data.dispatchAccess,true);
+ const temporary=await req('/api/routes',trainee,subDriver.cookie);
+ assert.equal(temporary.status,201);
+ assert.equal((await req('/api/routes/archive',{id:temporary.data.id},subDriver.cookie)).status,200);
+ await req('/api/accounts/update',{username:trainee.driver,dispatchAccess:false},admin.cookie);
+ assert.equal((await req('/api/routes',trainee,subDriver.cookie)).status,403);
  const assigned=await req('/api/routes',route,dispatcher.cookie);assert.equal(assigned.status,201);
  // Website sessions cannot accept, even when a client name header is supplied.
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,{'X-Nowaczyk-Client':'desktop'})).status,403);
@@ -154,18 +162,18 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/accounts/me',null,login.cookie)).data.user.username,'driver1');
  assert.equal((await req('/api/fleet/position',{x:10,z:20,speedKmh:60},desktop.cookie)).status,200);
  const desktopHeaders={'X-Nowaczyk-Desktop-Token':desktop.data.desktopToken};
- assert.equal((await req('/api/routes/progress',{id:assigned.data.id,drivenKm:10,status:'W trasie'},admin.cookie)).status,409);
+ assert.equal((await req('/api/routes/progress',{id:assigned.data.id,drivenKm:10,status:'W trasie'},dispatcher.cookie)).status,409);
  const accepted=await req('/api/routes/accept',{routeId:assigned.data.id},desktop.cookie,desktopHeaders);assert.equal(accepted.status,200);assert.equal(accepted.data.route.status,'Przyjęta');assert.equal(accepted.data.route.acceptedVia,'desktop');
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},desktop.cookie,desktopHeaders)).data.duplicate,true);
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,desktopHeaders)).status,403);
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},desktop.cookie,{...desktopHeaders,Origin:base})).status,403);
- assert.equal((await req('/api/routes',{...route,driver:'unknown'},admin.cookie)).status,400);
+ assert.equal((await req('/api/routes',{...route,driver:'unknown'},dispatcher.cookie)).status,400);
  assert.equal((await req('/api/accounts',{username:'other-driver',password:'other-driver-password',role:'driver'},admin.cookie)).status,201);
- const otherRoute=await req('/api/routes',{...route,driver:'other-driver'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:otherRoute.data.id},desktop.cookie,desktopHeaders)).status,403);
- const second=await req('/api/routes',{...route,to:'Poznan'},admin.cookie);assert.equal((await req('/api/routes/accept',{routeId:second.data.id},desktop.cookie,desktopHeaders)).status,200);
+ const otherRoute=await req('/api/routes',{...route,driver:'other-driver'},dispatcher.cookie);assert.equal((await req('/api/routes/accept',{routeId:otherRoute.data.id},desktop.cookie,desktopHeaders)).status,403);
+ const second=await req('/api/routes',{...route,to:'Poznan'},dispatcher.cookie);assert.equal((await req('/api/routes/accept',{routeId:second.data.id},desktop.cookie,desktopHeaders)).status,200);
  const mapSetRoute={...route,catalogProfile:'snapshot',from:'Wadowice',sourceCompany:'maspex',to:'Kraków',destinationCompany:'tradeaux'};
- assert.equal((await req('/api/routes',{...mapSetRoute,sourceCompany:'tradeaux'},admin.cookie)).status,400);
- const mapSetAssigned=await req('/api/routes',mapSetRoute,admin.cookie);
+ assert.equal((await req('/api/routes',{...mapSetRoute,sourceCompany:'tradeaux'},dispatcher.cookie)).status,400);
+ const mapSetAssigned=await req('/api/routes',mapSetRoute,dispatcher.cookie);
  assert.equal(mapSetAssigned.status,201);
  const mapSetExport=await req('/api/routes/export?id='+mapSetAssigned.data.id,null,desktop.cookie);
  assert.equal(mapSetExport.data.from.city,'wadowice');
@@ -173,7 +181,7 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.match(mapSetExport.data.from.loadingPlacement,/^\(/);
  assert.equal(mapSetExport.data.to.city,'krakow');
  assert.ok(mapSetExport.data.to.deliveryPlacements.hard.length);
- assert.equal((await req('/api/routes/archive',{id:mapSetAssigned.data.id},admin.cookie)).status,200);
+ assert.equal((await req('/api/routes/archive',{id:mapSetAssigned.data.id},dispatcher.cookie)).status,200);
  const meDesktop=await req('/api/accounts/me',null,desktop.cookie);assert.equal(meDesktop.data.user.desktopToken,undefined);
  for(const path of ['/','/index.html','/system-login.html']){
   const back=await fetch(base+path,{headers:{Cookie:dispatcher.cookie},redirect:'manual'});
@@ -236,9 +244,9 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(driverEconomy.data.payments[0].bonus,150);
  assert.deepEqual((await req('/api/economy?mine=1',null,admin.cookie)).data.payments,[]);
  // Parallel writes must not overwrite each other in the single-process store.
- const writes=await Promise.all(Array.from({length:6},(_,i)=>req('/api/routes',{...route,to:'City'+i},admin.cookie)));assert.ok(writes.every(x=>x.status===201));assert.equal((await req('/api/routes',null,admin.cookie)).data.length,9);
+ const writes=await Promise.all(Array.from({length:6},(_,i)=>req('/api/routes',{...route,to:'City'+i},dispatcher.cookie)));assert.ok(writes.every(x=>x.status===201));assert.equal((await req('/api/routes',null,admin.cookie)).data.length,9);
  assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},login.cookie)).status,403);
- assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},admin.cookie)).status,200);
+ assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},dispatcher.cookie)).status,200);
  assert.equal((await req('/api/routes/export?id='+otherRoute.data.id,null,admin.cookie)).status,404);
  const link=await fetch(base+'/trasy.html',{headers:{Cookie:login.cookie},redirect:'manual'});
  assert.equal(link.headers.get('location'),'/moj-panel.html#routes');

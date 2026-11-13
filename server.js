@@ -29,7 +29,7 @@ function mapSetCompany(city,company){
 }
 
 function passwordHash(pass,s=crypto.randomBytes(16).toString('hex')){return {salt:s,hash:crypto.scryptSync(pass,s,64).toString('hex')}}
-function safeAccount(a){return {id:a.id,username:a.username,role:a.role,dispatchAccess:a.dispatchAccess===true&&a.role==="driver",companyId:a.companyId,active:a.active}}
+function safeAccount(a){return {id:a.id,username:a.username,role:a.role,dispatchAccess:a.role!=='dispatcher'&&hasDispatcherRole(a),companyId:a.companyId,active:a.active}}
 const MAIN_COMPANY_ID='nowaczyk';
 const LEGACY_COMPANY_ID='ks';
 const initial={ledger:[],companies:[{id:MAIN_COMPANY_ID,name:'Nowaczyk Transport',bases:['Wadowice'],open:true,logo:''}],applications:[],routes:[],expenses:[],drivers:[]};
@@ -120,7 +120,14 @@ function canSetInitialBudget(req,companyId){
  return auth(req)&&(companyId===MAIN_COMPANY_ID||me.username.toLowerCase()==='kcvper');
 }
 function isSubcontractorBoss(req){const me=who(req);return me?.role==='subcontractor'||(me?.role==='boss'&&me.companyId!==MAIN_COMPANY_ID)}
-function canDispatch(req){const me=who(req);return auth(req)||me?.role==='dispatcher'||(me?.role==='driver'&&me.dispatchAccess===true)}
+function hasDispatcherRole(account){
+ return account?.role==='dispatcher'||(['driver','probation'].includes(account?.role)&&account.dispatchAccess===true);
+}
+function canDispatch(req){return auth(req)||hasDispatcherRole(who(req))}
+function canAssignRoutes(req){
+ const me=who(req);
+ return hasDispatcherRole(me)||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID);
+}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
 function body(req){
  return new Promise((resolve,reject)=>{
@@ -551,7 +558,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,200,[...accounts.values()].filter(a=>a.active&&(['admin','driver','probation'].includes(a.role)||(a.role==='boss'&&a.companyId===MAIN_COMPANY_ID))).map(a=>a.username).sort());
  }
  if(u.pathname==='/api/routes/archive'&&method==='POST'){
-  if(!canDispatch(req))return send(res,403,{error:'Brak dostępu do usuwania tras'});
+  if(!canAssignRoutes(req))return send(res,403,{error:'Zleceniami zarządza główny szef lub dyspozytor.'});
   const {id}=await body(req),index=(db.routes||[]).findIndex(route=>route.id===id);
   if(index<0)return send(res,404,{error:'Nie znaleziono trasy'});
   const route=db.routes[index];
@@ -568,7 +575,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/routes'&&method==='POST'){
   if(!who(req))return send(res,401,{error:'Sesja wygasła. Zaloguj się ponownie, aby zapisać trasę.'});
-  if(!canDispatch(req))return send(res,403,{error:'Trasy może przydzielać lub aktualizować Szef, Spedytor albo Administrator.'});
+  if(!canAssignRoutes(req))return send(res,403,{error:'Zleceniami zarządza główny szef lub dyspozytor.'});
   const a=await body(req),from=str(a.from,120),to=str(a.to,120),driver=str(a.driver,100);
   if(!from||!to||!driver)return send(res,400,{error:'Podaj kierowcę, początek i koniec trasy'});
   const account=accounts.get(driver.toLowerCase());
@@ -597,7 +604,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/routes/progress'&&method==='POST'){
   if(!who(req))return send(res,401,{error:'Sesja wygasła. Zaloguj się ponownie, aby zapisać trasę.'});
-  if(!canDispatch(req))return send(res,403,{error:'Trasy może przydzielać lub aktualizować Szef, Spedytor albo Administrator.'});
+  if(!canAssignRoutes(req))return send(res,403,{error:'Zleceniami zarządza główny szef lub dyspozytor.'});
   const a=await body(req),r=(db.routes||[]).find(x=>x.id===a.id);
   if(!r)return send(res,404,{error:'Nie znaleziono trasy'});
   if(r.deliveredAt||r.settledAt||r.status==='Zakończona')return send(res,409,{error:'Dystans ukończonej trasy pochodzi z dostawy ETS2.'});
@@ -722,7 +729,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!db.companies.some(company=>company.id===companyId))return send(res,400,{error:'Wybierz istniejącą firmę.'});
   if(role==='subcontractor'&&companyId===MAIN_COMPANY_ID)return send(res,400,{error:'Wybierz firmę podwykonawcy.'});
   if(accounts.has(username.toLowerCase()))return send(res,409,{error:'Login zajęty'});
-  const acct={id:crypto.randomUUID(),username,role,dispatchAccess:role==='driver'&&a.dispatchAccess===true,companyId,active:true,...passwordHash(pass)};
+  const acct={id:crypto.randomUUID(),username,role,dispatchAccess:['driver','probation'].includes(role)&&a.dispatchAccess===true,companyId,active:true,...passwordHash(pass)};
   accounts.set(username.toLowerCase(),acct);db.accounts=[...accounts.values()];await save(db);return send(res,201,safeAccount(acct));
  }
  if(u.pathname==='/api/accounts/update'&&method==='POST'){
@@ -741,7 +748,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(typeof a.active==='boolean')acct.active=a.active;
   if(a.password!==undefined)Object.assign(acct,passwordHash(a.password));
   if(a.role!==undefined&&ROLES.includes(a.role)&&acct.role!=='admin')acct.role=a.role;
-  if(acct.role!=='driver')delete acct.dispatchAccess;
+  if(!['driver','probation'].includes(acct.role))delete acct.dispatchAccess;
   else if(typeof a.dispatchAccess==='boolean')acct.dispatchAccess=a.dispatchAccess;
   if(!acct.active||a.password!==undefined)revokeAccountSessions(db,acct.id);
   db.accounts=[...accounts.values()];await save(db);return send(res,200,safeAccount(acct));
