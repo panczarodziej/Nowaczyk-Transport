@@ -144,6 +144,10 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/telemetry/events',{...event,eventKey:'bad-mass-123456',cargoMassKg:12000},login.cookie)).data.event.matchStatus,'unmatched');
  const inTransit=await req('/api/routes?mine=1',null,login.cookie);
  assert.equal(inTransit.data.find(route=>route.id===assigned.data.id).status,'W trasie');
+ assert.equal((await req('/api/fleet/position',{...packet,odometerKm:1650},desktop.cookie)).status,200);
+ const liveRoute=(await req('/api/routes?mine=1',null,login.cookie)).data.find(route=>route.id===assigned.data.id);
+ assert.equal(liveRoute.liveDrivenKm,650);
+ assert.equal(liveRoute.drivenKm,0);
  const delivered={...event,odometerKm:1602.3,cargoMassKg:19081,type:'job-delivered',eventKey:'delivery-event-123456'};
  const delivery=await req('/api/telemetry/events',delivered,desktop.cookie);
  assert.equal(delivery.status,201);

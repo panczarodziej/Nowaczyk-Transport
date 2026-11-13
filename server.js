@@ -251,7 +251,12 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const route=activeJob?(db.routes||[]).find(r=>r.id===latestJob.mileageRouteId&&
    r.driver.toLowerCase()===driver&&r.companyId===companyId&&r.acceptedAt&&!r.deliveredAt&&
    ['Przyjęta','W trasie'].includes(r.status)):null;
-  if(route?.status==='Przyjęta')route.status='W trasie';
+  if(route){
+   route.status='W trasie';
+   const start=latestJob.telemetry.odometerKm;
+   const distance=a.odometerKm-start;
+   if(Number.isFinite(start)&&start>=0&&distance<=100000)route.liveDrivenKm=Math.round(distance*10)/10;
+  }
   const key=me.username.toLowerCase(),previous=db.fleetPositions?.[key];
   const requested=str(a.activity,24);
   const activity=['Jazda','Pauza','Praca','Odpoczynek','Postój','Gra wstrzymana'].includes(requested)?requested:(speed>=3?'Jazda':'Postój');
@@ -438,12 +443,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const event={id:crypto.randomUUID(),eventKey,driver,companyId:me.companyId||MAIN_COMPANY_ID,type,telemetry,routeId:route?.id||null,mileageRouteId:mileageRoute?.id||null,matchStatus:route?'matched':'unmatched',checks,verified:false,settlementAllowed:false,receivedAt:new Date().toISOString()};
   if(mileageRoute?.status==='Przyjęta'&&type==='job-started')mileageRoute.status='W trasie';
   if(mileageRoute&&type==='job-delivered'){
-   const previous=db.telemetryEvents.find(e=>(e.mileageRouteId||e.routeId)===mileageRoute.id&&e.driver===driver&&e.companyId===event.companyId&&e.type==='job-started'&&Number.isFinite(e.telemetry?.odometerKm));
+   const previous=db.telemetryEvents.findLast(e=>(e.mileageRouteId||e.routeId)===mileageRoute.id&&e.driver===driver&&e.companyId===event.companyId&&e.type==='job-started'&&Number.isFinite(e.telemetry?.odometerKm));
    const odometerDistance=previous&&Number.isFinite(telemetry.odometerKm)?telemetry.odometerKm-previous.telemetry.odometerKm:null;
    const distance=telemetry.jobDeliveredDistanceKm??odometerDistance;
-   if(distance!==null&&distance>=0&&distance<=100000){
+   if(Number.isFinite(distance)&&distance>0&&distance<=100000&&Math.round(distance*10)>0){
     event.distanceKm=Math.round(distance*10)/10;
-    mileageRoute.drivenKm=Math.max(mileageRoute.drivenKm||0,event.distanceKm);
+    mileageRoute.drivenKm=event.distanceKm;
+    delete mileageRoute.liveDrivenKm;
     mileageRoute.deliveredAt=event.receivedAt;
     if(mileageRoute.drivenKm>0){
      mileageRoute.status='Zakończona';
@@ -564,6 +570,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDispatch(req))return send(res,403,{error:'Trasy może przydzielać lub aktualizować Szef, Spedytor albo Administrator.'});
   const a=await body(req),r=(db.routes||[]).find(x=>x.id===a.id);
   if(!r)return send(res,404,{error:'Nie znaleziono trasy'});
+  if(r.deliveredAt||r.settledAt||r.status==='Zakończona')return send(res,409,{error:'Dystans ukończonej trasy pochodzi z dostawy ETS2.'});
   const km=Number(a.drivenKm);if(!Number.isFinite(km)||km<0||km>100000)return send(res,400,{error:'Nieprawidłowy przebieg'});
   if(!r.acceptedAt&&(km>0||a.status&&a.status!=='Przydzielona'))return send(res,409,{error:'Kierowca musi najpierw przyjąć trasę w aplikacji'});
   if(km<r.drivenKm)return send(res,400,{error:'Przebieg nie może się zmniejszać'});
