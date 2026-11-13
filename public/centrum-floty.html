@@ -19,21 +19,27 @@
 </section></main><script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script><script>
 const $=id=>document.getElementById(id);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function driverState(p){
- if(!p.online)return 'Offline';
+ if(!p.online)return p.updatedAt?'Offline · ostatnia pozycja':'Offline · brak danych z aplikacji';
  if(p.activity==='Gra wstrzymana')return 'Aktywny · gra wstrzymana';
  return p.speedKmh>=3?'Aktywny · jedzie':'Aktywny · stoi';
+}
+function positionTime(p){
+ return Number.isFinite(Date.parse(p.updatedAt))
+  ?new Date(p.updatedAt).toLocaleString('pl-PL',{timeZone:'Europe/Warsaw',dateStyle:'short',timeStyle:'medium'})
+  :'';
 }
 function locationLabel(p){
  const city=[p.city,p.country].filter(Boolean).join(', ');
  const coordinates=Number.isFinite(p.x)&&Number.isFinite(p.z)&&(p.x!==0||p.z!==0)?'X '+Math.round(p.x)+' / Z '+Math.round(p.z):'';
  const location=city||coordinates;
- return location?(p.online?location:'Ostatnia: '+location):'Brak pozycji';
+ return location?(p.online?location:'Ostatnia: '+location+' · '+positionTime(p)):'Brak pozycji';
 }
 const mapDriver=$('mapDriver');
 const markers=new Map();
 let fleetMap=null;
 let latestPositions=[];
 let centeredOnFleet=false;
+let centeredOnLastPosition=false;
 function showMapError(message){
  const error=$('mapError');
  error.textContent=message;
@@ -148,7 +154,7 @@ function drivingTime(p){
 }
 function markerLabel(p){
  const moving=p.online&&p.speedKmh>=3&&p.activity!=='Gra wstrzymana';
- return [p.driver,p.companyName,driverState(p),routeLabel(p),moving?p.speedKmh+' km/h · jedzie od '+drivingTime(p):''].filter(Boolean).join(' · ');
+ return [p.driver,p.companyName,driverState(p),!p.online&&positionTime(p),routeLabel(p),moving?p.speedKmh+' km/h · jedzie od '+drivingTime(p):''].filter(Boolean).join(' · ');
 }
 function updateMap(positions){
  latestPositions=positions;
@@ -190,9 +196,12 @@ function updateMap(positions){
  }
  if(!centeredOnFleet&&!mapDriver.value){
   const active=positions.find(p=>p.online&&visible.has(p.driver));
-  if(active){
-   fleetMap.setView(markers.get(active.driver).point,Math.max(4,fleetMap.getZoom()));
-   centeredOnFleet=true;
+  const latest=active||positions.filter(p=>visible.has(p.driver))
+   .sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt))[0];
+  if(latest&&(active||!centeredOnLastPosition)){
+   fleetMap.setView(markers.get(latest.driver).point,Math.max(4,fleetMap.getZoom()));
+   centeredOnFleet=Boolean(active);
+   centeredOnLastPosition=true;
   }
  }
  for(const [name,entry] of markers)if(!visible.has(name)){
