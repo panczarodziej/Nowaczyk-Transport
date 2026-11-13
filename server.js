@@ -652,8 +652,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const a=await body(req),c=db.companies.find(x=>x.id===a.companyId&&x.open);
   if(!c)return send(res,400,{error:'Ta firma nie prowadzi rekrutacji.'});
   const fullname=str(a.fullname,80),discord=str(a.discord,70),age=Number(a.age),hours=Number(a.hours);
-  if(fullname.length<2||discord.length<2||!Number.isInteger(age)||age<13||age>99||!Number.isFinite(hours)||hours<0)return send(res,400,{error:'Uzupełnij wymagane pola.'});
-  const x={id:crypto.randomUUID(),companyId:c.id,companyName:c.name,fullname,discord,age,hours,norm:str(a.norm),availability:str(a.availability,500),truck:str(a.truck,150),reason:str(a.reason,2000),date:new Date().toISOString(),status:'Nowe'};
+  if(fullname.split(/\s+/).filter(part=>/\p{L}/u.test(part)).length<2||discord.length<2||!Number.isInteger(age)||age<13||age>99||!Number.isFinite(hours)||hours<0)return send(res,400,{error:'Uzupełnij wymagane pola.'});
+  const photoUrl=str(a.photoUrl,1000);
+  if(photoUrl){
+   try{
+    const url=new URL(photoUrl);
+    if(url.protocol!=='https:'||url.username||url.password)throw Error();
+   }catch{return send(res,400,{error:'Link do zdjęć musi być poprawnym adresem HTTPS.'})}
+  }
+  const x={id:crypto.randomUUID(),companyId:c.id,companyName:c.name,fullname,discord,age,hours,photoUrl,experience:str(a.experience,1200),mapProfile:str(a.mapProfile,80),norm:str(a.norm),availability:str(a.availability,500),truck:str(a.truck,150),reason:str(a.reason,2000),date:new Date().toISOString(),status:'Nowe'};
   db.applications.push(x);await save(db);return send(res,201,{ok:true,id:x.id});
  }
  // Flota online: przypisania według ID konta, niezależne od lokalnych danych DEMO.

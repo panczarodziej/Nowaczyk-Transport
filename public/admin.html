@@ -1,37 +1,73 @@
-<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Panel rekrutacji online</title><style>body{font:15px Segoe UI,Arial;background:#f3f6f9;margin:0;color:#17283a}main{max-width:1100px;margin:35px auto;padding:0 20px}.box{background:white;padding:22px;border-radius:13px;margin:16px 0;border:1px solid #d9e2ed}input,select,button{font:inherit;padding:9px;margin:5px;border-radius:7px;border:1px solid #b7c5d3}button{background:#2462a5;color:white;cursor:pointer}table{border-collapse:collapse;width:100%;background:white}td,th{padding:10px;border-bottom:1px solid #ddd;text-align:left}#panel{display:none}.muted{color:#607287}</style><main><h1>Nowaczyk Transport — rekrutacja online</h1><p><a id="operations" href="/system.html">← Centrum operacyjne</a> <a href="/firma.html">Moja firma</a> <a id="companyMap" href="/centrum-floty.html" hidden>Mapa moich kierowców</a> <button id="logout">Wyloguj</button></p><p id="error" role="status"></p><div id="panel"><div class="box"><h2>Podania kierowców</h2><div id="applications"></div></div></div></main><script>
-const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));let companies=[];
-async function api(url,method='GET',data){const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});const j=await r.json();if(!r.ok)throw Error(j.error||'Błąd');return j}
-async function load(){try{
-const {user}=await api('/api/accounts/me');
-const recruiter=user?.role==='subcontractor'||(user?.role==='boss'&&user.companyId!=='nowaczyk');
-companies=await api('/api/admin/companies');
-if(recruiter){
- document.getElementById('operations').hidden=true;
- document.getElementById('companyMap').hidden=false;
- const apps=await api('/api/admin/applications');
- document.getElementById('panel').style.display='block';
- const list=document.getElementById('applications');
- list.replaceChildren();
- if(!apps.length)list.textContent='Brak podań do Twojej firmy.';
- for(const a of apps){
-  const row=document.createElement('p');
-  row.textContent=[a.fullname,a.discord,a.status,a.reason].filter(Boolean).join(' · ');
-  if(a.status==='Nowe'){
-   const button=document.createElement('button');
-   button.textContent='Przyjmij';
-   button.onclick=async()=>{
-    button.disabled=true;
-    try{await api('/api/admin/applications','PATCH',{id:a.id,status:'Przyjęte'});await load()}
-    catch(error){document.getElementById('error').textContent=error.message;button.disabled=false}
-   };
-   row.append(button);
-  }
-  list.append(row);
- }
- return;
+<!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Panel rekrutacji online</title><style>body{font:15px Segoe UI,Arial;background:#f3f6f9;margin:0;color:#17283a}main{max-width:1100px;margin:35px auto;padding:0 20px}.box{background:white;padding:22px;border-radius:13px;margin:16px 0;border:1px solid #d9e2ed}input,select,button{font:inherit;padding:9px;margin:5px;border-radius:7px;border:1px solid #b7c5d3}button{background:#2462a5;color:white;cursor:pointer}table{border-collapse:collapse;width:100%;background:white}td,th{padding:10px;border-bottom:1px solid #ddd;text-align:left}#panel{display:none}.muted{color:#607287}.candidate{border:1px solid #d9e2ed;border-radius:10px;padding:16px;margin:12px 0}.candidate h3{margin:0}.candidate details{margin:10px 0;white-space:pre-wrap}summary{cursor:pointer}button[aria-pressed="true"]{background:#142f50}</style><main><h1>Nowaczyk Transport — rekrutacja online</h1><p><a id="operations" href="/system.html">← Centrum operacyjne</a> <a href="/firma.html">Moja firma</a> <a id="companyMap" href="/centrum-floty.html" hidden>Mapa moich kierowców</a> <button id="logout">Wyloguj</button></p><p id="error" role="status"></p><div id="panel"><div class="box"><h2>Podania kierowców</h2><nav id="applicationTabs" aria-label="Status podań"></nav><div id="applications"></div></div></div></main><script>
+const get=id=>document.getElementById(id);
+const statuses=['Nowe','Przyjęte','Odrzucone'];
+let companies=[],applications=[],recruiter=false,selected='Nowe';
+async function api(url,method='GET',data){
+ const response=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});
+ const result=await response.json();
+ if(!response.ok)throw Error(result.error||'Błąd serwera');
+ return result;
 }
-const apps=await api('/api/admin/applications');document.getElementById('panel').style.display='block';
- document.getElementById('applications').innerHTML=apps.length?`<div style="overflow:auto"><table><tr><th>Kandydat</th><th>Discord</th><th>Godziny</th><th>Firma</th><th>Status</th><th>Akcje</th></tr>${apps.map(a=>`<tr><td>${esc(a.fullname)}<br><small>${esc(a.reason)}</small></td><td>${esc(a.discord)}</td><td>${esc(a.hours)}</td><td><select data-company="${esc(a.id)}">${companies.map(c=>`<option value="${esc(c.id)}" ${c.id===a.companyId?'selected':''}>${esc(c.name)}</option>`).join('')}</select></td><td>${esc(a.status)}</td><td><button data-status="Przyjęte" data-id="${esc(a.id)}">Przyjmij</button><button data-status="Odrzucone" data-id="${esc(a.id)}">Odrzuć</button></td></tr>`).join('')}</table></div>`:'<p class="muted">Brak kierowców — nie ma jeszcze podań.</p>';document.querySelectorAll('[data-status]').forEach(b=>b.onclick=async()=>{await api('/api/admin/applications','PATCH',{id:b.dataset.id,status:b.dataset.status,companyId:document.querySelector('[data-company="'+b.dataset.id+'"]').value});load()});document.querySelectorAll('[data-company]').forEach(b=>b.onchange=async()=>{await api('/api/admin/applications','PATCH',{id:b.dataset.company,companyId:b.value});load()})}catch(e){document.getElementById('error').textContent=e.message}}
-document.getElementById('logout').onclick=async()=>{await api('/api/logout','POST');location.href='/system-login.html'};
+function element(tag,text){const node=document.createElement(tag);node.textContent=text;return node}
+function applicationCard(app){
+ const card=element('article','');card.className='candidate';
+ card.append(element('h3',app.fullname));
+ const facts=[app.companyName,app.age!=null?app.age+' lat':'',app.hours!=null?app.hours+' h w ETS2':'',app.discord?'Discord: '+app.discord:''].filter(Boolean);
+ card.append(element('p',facts.join(' · ')));
+ const details=element('details','');
+ details.append(element('summary','Szczegóły podania'));
+ for(const [label,value] of [['Doświadczenie',app.experience],['Mapa ETS2',app.mapProfile],['Dyspozycyjność',app.availability],['Ciągnik',app.truck],['Dlaczego chce dołączyć',app.reason]]){
+  const row=element('p','');row.append(element('strong',label+' '),document.createTextNode(value||'Nie podano'));details.append(row);
+ }
+ if(app.photoUrl){
+  try{
+   const url=new URL(app.photoUrl);
+   if(url.protocol==='https:'&&!url.username&&!url.password){
+    const link=element('a','Zobacz zdjęcia zestawu');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';details.append(link);
+   }
+  }catch{}
+ }
+ card.append(details);
+ async function update(button,fields){
+  button.disabled=true;get('error').textContent='';
+  try{await api('/api/admin/applications','PATCH',{id:app.id,...fields});await loadApplications()}
+  catch(error){get('error').textContent=error.message;button.disabled=false}
+ }
+ if(!recruiter){
+  const label=element('label','Firma '),select=element('select','');
+  select.append(...companies.map(company=>new Option(company.name,company.id)));
+  select.value=app.companyId;
+  select.onchange=()=>{const companyId=select.value;select.value=app.companyId;void update(select,{companyId})};
+  label.append(select);card.append(label);
+ }
+ const actions=recruiter?(app.status==='Nowe'?['Przyjęte']:[]):statuses.slice(1).filter(status=>status!==app.status);
+ for(const status of actions){
+  const button=element('button',status==='Przyjęte'?'Przyjmij':'Odrzuć');
+  button.onclick=()=>update(button,{status});card.append(button);
+ }
+ return card;
+}
+function render(){
+ const tabs=recruiter?statuses.slice(0,2):statuses;
+ get('applicationTabs').replaceChildren(...tabs.map(status=>{
+  const count=applications.filter(app=>app.status===status).length;
+  const button=element('button',status+' ('+count+')');
+  button.setAttribute('aria-pressed',String(status===selected));
+  button.onclick=()=>{selected=status;render()};return button;
+ }));
+ const rows=applications.filter(app=>app.status===selected).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+ get('applications').replaceChildren(...(rows.length?rows.map(applicationCard):[element('p','Brak podań w tej zakładce.')]));
+}
+async function loadApplications(){applications=await api('/api/admin/applications');render()}
+async function load(){
+ try{
+  const {user}=await api('/api/accounts/me');
+  recruiter=user?.role==='subcontractor'||(user?.role==='boss'&&user.companyId!=='nowaczyk');
+  if(recruiter){get('operations').hidden=true;get('companyMap').hidden=false}
+  else companies=await api('/api/admin/companies');
+  await loadApplications();get('panel').style.display='block';
+ }catch(error){get('error').textContent=error.message}
+}
+get('logout').onclick=async()=>{await api('/api/logout','POST');location.href='/system-login.html'};
 load();
 </script></html>
