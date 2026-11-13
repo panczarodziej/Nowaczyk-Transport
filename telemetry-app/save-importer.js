@@ -30,6 +30,21 @@ function replaceField(text,key,value){const re=new RegExp('^(\\s*'+key+':\\s*)[^
 function validPlacement(value){
  return typeof value==='string'&&/^\([0-9&., +eEabcdefA-F-]+\)\s*\([0-9&.,; +eEabcdefA-F-]+\)$/.test(value)&&!value.includes('&60ad78ec');
 }
+function placementCoordinates(value){
+ if(!validPlacement(value))return null;
+ const parts=value.slice(1,value.indexOf(')')).split(',').map(part=>{
+  const token=part.trim();
+  if(/^&[a-f0-9]{8}$/i.test(token))return Buffer.from(token.slice(1),'hex').readFloatBE();
+  return Number(token);
+ });
+ return parts.length===3&&parts.every(Number.isFinite)?parts:null;
+}
+function freePlacement(choices,occupied){
+ return choices.find(value=>{
+  const point=placementCoordinates(value);
+  return point&&occupied.every(other=>Math.abs(point[1]-other[1])>4||Math.hypot(point[0]-other[0],point[2]-other[2])>=4);
+ });
+}
 function readLoadingPoint(file,side){
  if(fs.statSync(file).size>maxSaveBytes)throw Error('Zapis wzorcowy jest zbyt duży.');
  const list=units(decodeSave(fs.readFileSync(file)));
@@ -114,11 +129,17 @@ if(!slot&&ramps){
  const km=Number(job.plannedKm);if(!Number.isSafeInteger(km)||km<=0||km>30000)throw Error('Zlecenie musi mieć całkowity dystans 1–30000 km');
  const economy=list.find(u=>u.type==='economy');const clock=Number(economy&&field(economy,'game_time'));if(!Number.isSafeInteger(clock)||clock<0)throw Error('Brak czasu gry w zapisie');
  if(ramps){
-  const sourcePlacement=ramps.source;
+  // Check parked trailers that have a persisted world placement.
+  const occupied=list.filter(unit=>unit.type==='player_vehicles'&&unit.id!==field(player,'assigned_vehicles')&&
+   field(unit,'trailer')&&field(unit,'trailer')!=='null')
+   .flatMap(unit=>[...unit.text.matchAll(/^ *stored_trailer_placements\[\d+\]: *([^\r\n]+)/gm)])
+   .map(match=>placementCoordinates(match[1].trim())).filter(Boolean);
+  const sourcePlacement=freePlacement([ramps.source,...(source.loadingPlacements||[])],occupied);
   const points=dest.deliveryPlacements;
-  const target=points?.easy?.[0];
-  if(!validPlacement(sourcePlacement)||!validPlacement(target))throw Error('Brak punktu załadunku lub rozładunku. Wybierz trasę z katalogu Nowaczyk.');
-  const [medium,hard]=['medium','hard'].map(type=>validPlacement(points[type]?.[0])?points[type][0]:target);
+  const target=freePlacement([...(points?.hard||[]),...(points?.medium||[]),...(points?.easy||[])],occupied);
+  if(!sourcePlacement||!target)throw Error('Brak wolnego stanowiska załadunku lub rozładunku w zapisie. Wybierz inną firmę albo odśwież zapis.');
+  // Use one destination for every parking option, including auto-parking.
+  const medium=target,hard=target;
   const numbers={units_count:Number(field(slot,'units_count')),ferry_time:Number(field(slot,'ferry_time')||0),ferry_price:Number(field(slot,'ferry_price')||0),urgency:Number(field(slot,'urgency')||0)};
   if(Object.values(numbers).some(n=>!Number.isSafeInteger(n)||n<0)||!numbers.units_count)throw Error('Nieprawidłowe dane wzorcowej oferty ETS2.');
   const id='_nameless.aaa.'+crypto.randomBytes(2).toString('hex')+'.'+crypto.randomBytes(2).toString('hex');

@@ -93,6 +93,16 @@ trailer_def : trailer_def.scs.box {
 }`);
  const point='(1, 2, 3)(1; 0, 0, 0)';
  const ownedJob={...job,trailerType:'firanka',to:{...job.to,deliveryPlacements:{easy:[point]}}};
+ const dock='(30, 2, 3)(1; 0, 0, 0)';
+ const parked=fixture.replace('trailer : _trailer {', `player_vehicles : _parked {
+ trailer: _other
+ stored_trailer_placements[0]: ${dock}
+}
+trailer : _trailer {`);
+ const rampJob={...ownedJob,to:{...ownedJob.to,deliveryPlacements:{hard:[dock,'(45, 2, 3)(1; 0, 0, 0)'],easy:[point]}}};
+ const parkedResult=plan(parked,rampJob,{source:point});
+ assert.match(parkedResult.text,/target_placement: \(45, 2, 3\)/);
+ assert.match(parkedResult.text,/target_placement_medium: \(45, 2, 3\)/);
  const modern=plan(fixture,ownedJob,{source:point});
  assert.match(modern.text,/is_cargo_market_job: true/);
  assert.match(modern.text,/is_trailer_loaded: false/);

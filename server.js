@@ -505,7 +505,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    return Object.hasOwn(companyAliases,key)?companyAliases[key]:name||'';
   }
   const job={mapProfile,schema:'ks-group-dispatch-v1',acceptedAt:r.acceptedAt||null,id:r.id,driver:r.driver,from:{country:r.fromCountry||'',city:r.mapSetFrom||cityId(r.from,cities),company:r.mapSetFrom?r.sourceCompany:companyId(r.sourceCompany)},to:{country:r.toCountry||'',city:r.mapSetTo||cityId(r.to,cities),company:r.mapSetTo?r.destinationCompany:companyId(r.destinationCompany)},cargo:{name:r.cargo||'',id:alias(polishNames.cargo,r.cargo)||r.cargo||'',tons:r.cargoTons||0},plannedKm:r.plannedKm||0,freightPLN:r.freight||0,trailerId:r.trailerId||null,trailerType:['firanka','chlodnia'].includes(r.trailerType)?r.trailerType:null,createdAt:r.createdAt||null,notice:'Manifest dyspozytorski. Nie tworzy zlecenia w ETS2.'};
-  if(mapSetCompany(job.from.city,job.from.company))job.from.loadingPlacement=nowaczykMap[job.from.city][job.from.company].easy?.[0];
+  if(mapSetCompany(job.from.city,job.from.company)){
+   const points=nowaczykMap[job.from.city][job.from.company];
+   job.from.loadingPlacements=points.easy||[];
+   job.from.loadingPlacement=job.from.loadingPlacements[0];
+  }
   if(mapSetCompany(job.to.city,job.to.company))job.to.deliveryPlacements=nowaczykMap[job.to.city][job.to.company];
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="ks-job-'+r.id+'.json"','Cache-Control':'no-store'});return res.end(JSON.stringify(job,null,2));
  }
