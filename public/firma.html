@@ -14,15 +14,30 @@ a{color:#12568c;text-decoration:none}
 article{background:white;border:1px solid #d1dfee;border-radius:12px;padding:20px}
 article h2{font-size:16px;margin:0 0 12px;color:#52687f}
 article strong{font-size:27px}
+[hidden]{display:none!important}
+#companySettings article,#createCompany{margin:14px 0}
+form,label{margin:8px 0}
+label{display:block}
+input,button{font:inherit;padding:7px}
+button+button{margin-left:8px}
 </style>
 </head>
 <body>
 <header>Nowaczyk Transport</header>
 <main>
 <a href="/">← Wróć do panelu</a>
-<h1>Podsumowanie firmy</h1>
+<h1 id="title">Moja firma</h1>
+<nav><a href="/admin.html">Rekrutacja</a> · <a href="/centrum-floty.html">Mapa kierowców</a> <a id="partnerLink" href="/podwykonawcy.html" hidden> · Podwykonawcy</a></nav>
+<p id="settingsStatus" role="status"></p>
+<form id="createCompany" hidden>
+ <label>Nazwa firmy <input name="name" required minlength="2" maxlength="90"></label>
+ <label>Miasto bazy <input name="city" maxlength="90"></label>
+ <label>Identyfikator firmy <input name="id" maxlength="80"></label>
+ <button>Utwórz firmę</button>
+</form>
+<div id="companySettings"></div>
 <p id="status" role="status">Pobieranie danych…</p>
-<div class="grid">
+<div class="grid" id="stats">
 <article><h2>Przejechane kilometry</h2><strong id="km">—</strong></article>
 <article><h2>Dostawy</h2><strong id="deliveries">—</strong></article>
 <article><h2>Zarobek firmy z dostaw</h2><strong id="revenue">—</strong></article>
@@ -41,15 +56,71 @@ async function refresh(){
   const response=await fetch('/api/company/summary',{cache:'no-store'});
   if(!response.ok)throw Error('Nie udało się pobrać danych firmy.');
   const data=await response.json();
-  for(const key of fields)document.getElementById(key).textContent=data[key].toLocaleString('pl-PL');
+  for(const key of fields)document.getElementById(key).textContent=(data[key]??(key==='deliveries'?data.completedRoutes:null))?.toLocaleString('pl-PL')??'—';
   document.getElementById('km').textContent=data.km.toLocaleString('pl-PL')+' km';
   document.getElementById('online').textContent=data.online+' / '+data.drivers;
-  for(const key of ['revenue','driverPayments','pendingDriverPay'])document.getElementById(key).textContent=Number(data[key]||0).toLocaleString('pl-PL',{style:'currency',currency:'PLN'});
+  for(const key of ['revenue','driverPayments','pendingDriverPay'])document.getElementById(key).textContent=data[key]?.toLocaleString('pl-PL',{style:'currency',currency:'PLN'})??'—';
   status.textContent='Dane z zapisanych zleceń i bieżącej telemetrii.';
  }catch(error){status.textContent=error.message}
  setTimeout(refresh,15000);
 }
-refresh();
+const partners=location.pathname==='/podwykonawcy.html';
+const get=id=>document.getElementById(id);
+const money=cents=>(cents/100).toLocaleString('pl-PL',{style:'currency',currency:'PLN'});
+async function api(url,method='GET',data){
+ const response=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});
+ const result=await response.json();
+ if(!response.ok)throw Error(result.error);
+ return result;
+}
+function element(tag,label){const item=document.createElement(tag);if(label)item.textContent=label;return item}
+function action(button,run){
+ button.disabled=true;
+ get('settingsStatus').textContent='';
+ Promise.resolve().then(run).then(loadCompanies).catch(error=>{get('settingsStatus').textContent=error.message}).finally(()=>{button.disabled=false});
+}
+async function loadCompanies(){
+ const {user}=await api('/api/accounts/me');
+ const companies=await api('/api/admin/companies');
+ const manager=user.role==='admin'||(user.role==='boss'&&user.companyId==='nowaczyk');
+ const budgets=partners?await api('/api/budgets'):[];
+ get('partnerLink').hidden=!manager||partners;
+ get('createCompany').hidden=!partners;
+ const cards=companies.filter(c=>partners?c.id!=='nowaczyk':c.id===user.companyId||manager&&c.id==='nowaczyk').map(company=>{
+  const card=element('article');
+  card.append(element('h2',company.name));
+  if(company.logo){const img=element('img');img.src=company.logo;img.alt='Logo '+company.name;img.style.maxWidth='150px';card.append(img)}
+  const logoLabel=element('label','Logo firmy '),logo=element('input');logo.type='file';logo.accept='image/png,image/jpeg,image/webp';logoLabel.append(logo);
+  const update=fields=>api('/api/admin/companies','PATCH',{id:company.id,...fields});
+  logo.onchange=()=>{const file=logo.files[0];if(!file)return;action(logo,async()=>{
+   if(file.size>85000)throw Error('Logo może mieć maksymalnie 85 KB.');
+   const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file)});
+   await update({logo:data});
+  })};
+  const basesLabel=element('label','Bazy (po przecinku) '),bases=element('input');bases.value=(company.bases||[]).join(', ');basesLabel.append(bases);
+  const save=element('button','Zapisz bazy');save.onclick=()=>action(save,()=>update({bases:bases.value.split(',')}));
+  const recruitment=element('button',company.open?'Zamknij rekrutację':'Otwórz rekrutację');recruitment.onclick=()=>action(recruitment,()=>update({open:!company.open}));
+  card.append(logoLabel,basesLabel,save,recruitment);
+  const budget=budgets.find(b=>b.companyId===company.id);
+  if(budget?.locked)card.append(element('p','Budżet startowy · '+money(budget.initialCents)));
+  if(budget&&!budget.locked&&budget.canSetInitialBudget){
+   const form=element('form'),label=element('label','Budżet startowy (PLN) '),amount=element('input'),submit=element('button','Nadaj budżet');
+   amount.type='number';amount.min='0';amount.step='0.01';amount.required=true;label.append(amount);form.append(label,submit);card.append(form);
+   form.onsubmit=event=>{event.preventDefault();if(confirm('Zatwierdzić budżet startowy? Kwota zostanie zablokowana.'))action(submit,()=>api('/api/budgets','POST',{companyId:company.id,amount:amount.value,confirm:true}))};
+  }
+  return card;
+ });
+ get('companySettings').replaceChildren(...cards);
+}
+get('createCompany').onsubmit=event=>{
+ event.preventDefault();
+ const form=event.currentTarget;
+ action(event.submitter,async()=>{await api('/api/admin/companies','POST',Object.fromEntries(new FormData(form)));form.reset()});
+};
+if(partners){get('title').textContent='Podwykonawcy';get('stats').hidden=true;get('status').hidden=true}
+else refresh();
+loadCompanies().catch(error=>{get('settingsStatus').textContent=error.message});
+
 </script>
 </body>
 </html>
