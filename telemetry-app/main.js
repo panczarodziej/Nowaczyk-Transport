@@ -47,7 +47,7 @@ async function installPlugin(etsPath){
 }
 function gameStatus(){return new Promise(resolve=>{
  if(process.platform!=='win32')return resolve({running:false,platform:process.platform});
- cp.execFile('tasklist',['/FI','IMAGENAME eq eurotrucks2.exe','/FO','CSV','/NH'],{windowsHide:true,timeout:4500},(err,out)=>resolve({running:!err&&/"eurotrucks2\.exe"/i.test(out),platform:'win32'}));
+ cp.execFile('tasklist',['/FI','IMAGENAME eq eurotrucks2.exe','/FO','CSV','/NH'],{windowsHide:true,timeout:4500},(err,out)=>resolve({running:err?null:/"eurotrucks2\.exe"/i.test(out),platform:'win32'}));
 });}
 async function serverStatus(url){try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))throw Error('Nieprawidłowy adres');const r=await fetch(new URL('/api/companies',u),{signal:AbortSignal.timeout(8000)});return {online:r.ok,status:r.status}}catch(e){return {online:false,error:'Brak połączenia z serwerem'}}}
 let captureDriver=null;
@@ -160,6 +160,23 @@ async function autoDispatch(){
 function startUpdates(){
  if(!app.isPackaged||process.platform!=='win32')return;
  const {autoUpdater}=require('electron-updater');
+ autoUpdater.autoInstallOnAppQuit=false;
+ let downloaded=false,checkingGame=false;
+ async function installWhenIdle(){
+  if(!downloaded||checkingGame||syncInProgress||pendingEvents.length||autoDispatchBusy||app.isQuitting)return;
+  checkingGame=true;
+  try{
+   const game=await gameStatus();
+   if(game.running!==false||syncInProgress||pendingEvents.length||autoDispatchBusy||app.isQuitting)return;
+   downloaded=false;
+   autoUpdater.quitAndInstall();
+  }finally{checkingGame=false}
+ }
+ autoUpdater.on('update-downloaded',()=>{
+  downloaded=true;
+  void installWhenIdle();
+ });
+ setInterval(()=>void installWhenIdle(),30000).unref();
  autoUpdater.on('error',error=>console.error('Aktualizacja:',error.message));
  const check=()=>autoUpdater.checkForUpdates().catch(error=>console.error('Sprawdzanie aktualizacji:',error.message));
  check();
