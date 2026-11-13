@@ -142,6 +142,8 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const event={odometerKm:1000,type:'job-started',eventKey:'test-event-123456',sourceCity:'Krakow',destinationCity:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'pallets',cargoMassKg:18000};
  assert.equal((await req('/api/telemetry/events',event,login.cookie)).data.event.matchStatus,'matched');assert.equal((await req('/api/telemetry/events',event,login.cookie)).data.duplicate,true);
  assert.equal((await req('/api/telemetry/events',{...event,eventKey:'bad-mass-123456',cargoMassKg:12000},login.cookie)).data.event.matchStatus,'unmatched');
+ const inTransit=await req('/api/routes?mine=1',null,login.cookie);
+ assert.equal(inTransit.data.find(route=>route.id===assigned.data.id).status,'W trasie');
  const delivered={...event,odometerKm:1602.3,cargoMassKg:19081,type:'job-delivered',eventKey:'delivery-event-123456'};
  const delivery=await req('/api/telemetry/events',delivered,desktop.cookie);
  assert.equal(delivery.status,201);
