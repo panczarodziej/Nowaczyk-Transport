@@ -160,6 +160,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&
+    !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
     !['/api/accounts/me','/api/accounts/login','/api/accounts/password','/api/logout','/api/admin/applications','/api/companies','/api/me'].includes(u.pathname)){
   return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji i mapy własnej firmy.'});
@@ -336,12 +337,20 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  // Budżet początkowy: niezmienny wpis, zabezpieczony unikalnym kluczem w PostgreSQL.
  if(u.pathname==='/api/budgets'&&method==='GET'){
-  if(!auth(req))return send(res,403,{error:'Tylko administrator'});
+  const mine=u.searchParams.get('mine')==='1';
+  if(!auth(req)&&!(mine&&isSubcontractorBoss(req)))return send(res,403,{error:'Tylko administrator'});
   let entries;
   if(pool){const q=await pool.query('SELECT company_id,initial_cents,locked_at FROM ks_company_budget');entries=q.rows.map(x=>({companyId:x.company_id,initialCents:Number(x.initial_cents),lockedAt:x.locked_at}))}
   else entries=Object.entries(db.initialBudgets||{}).map(([companyId,x])=>({companyId,...x}));
-  const budgets=(db.companies||[]).map(c=>{
-   const b=entries.find(x=>x.companyId===c.id),income=(db.ledger||[]).filter(x=>x.companyId===c.id).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0),costs=(db.expenses||[]).filter(x=>{const r=(db.routes||[]).find(r=>r.id===x.routeId);return (x.companyId||r?.companyId||MAIN_COMPANY_ID)===c.id}).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
+  const budgets=(db.companies||[]).filter(c=>!mine||c.id===who(req).companyId).map(c=>{
+   const b=entries.find(x=>x.companyId===c.id);
+   const transactions=(db.ledger||[]).filter(x=>x.companyId===c.id).map(x=>Math.round(Number(x.amount||0)*100));
+   const income=transactions.reduce((sum,cents)=>sum+Math.max(0,cents),0);
+   const operatingCosts=(db.expenses||[]).filter(x=>{
+    const route=(db.routes||[]).find(r=>r.id===x.routeId);
+    return (x.companyId||route?.companyId||MAIN_COMPANY_ID)===c.id;
+   }).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
+   const costs=transactions.reduce((sum,cents)=>sum+Math.max(0,-cents),operatingCosts);
    return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id),locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b?b.initialCents+income-costs:null};
   });return send(res,200,budgets);
  }

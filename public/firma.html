@@ -37,6 +37,15 @@ button+button{margin-left:8px}
 </form>
 <div id="companySettings"></div>
 <p id="status" role="status">Pobieranie danych…</p>
+<section id="companyMoney" hidden>
+<h2>Pieniądze firmy</h2>
+<div class="grid">
+<article><h2>Aktualne saldo</h2><strong id="balanceCents">—</strong></article>
+<article><h2>Przychody</h2><strong id="incomeCents">—</strong></article>
+<article><h2>Koszty</h2><strong id="costCents">—</strong></article>
+</div>
+<p id="moneyStatus" role="status"></p>
+</section>
 <div class="grid" id="stats">
 <article><h2>Przejechane kilometry</h2><strong id="km">—</strong></article>
 <article><h2>Dostawy</h2><strong id="deliveries">—</strong></article>
@@ -118,7 +127,22 @@ get('createCompany').onsubmit=event=>{
  action(event.submitter,async()=>{await api('/api/admin/companies','POST',Object.fromEntries(new FormData(form)));form.reset()});
 };
 if(partners){get('title').textContent='Podwykonawcy';get('stats').hidden=true;get('status').hidden=true}
-else refresh();
+else{
+ refresh();
+ async function refreshMoney(){
+  try{
+   const [budget]=await api('/api/budgets?mine=1');
+   if(!budget)throw Error('Brak danych finansowych firmy.');
+   get('companyMoney').hidden=false;
+   for(const key of ['balanceCents','incomeCents','costCents']){
+    get(key).textContent=budget[key]===null?'Brak budżetu startowego':money(budget[key]);
+   }
+   get('moneyStatus').textContent='';
+  }catch(error){if(get('companyMoney').hidden)return;get('moneyStatus').textContent=error.message}
+  finally{setTimeout(refreshMoney,15000)}
+ }
+ refreshMoney();
+}
 loadCompanies().catch(error=>{get('settingsStatus').textContent=error.message});
 
 </script>
