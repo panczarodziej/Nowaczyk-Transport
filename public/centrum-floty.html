@@ -11,7 +11,7 @@
 .parking-pin{background:#2662a0;border:1px solid white;border-radius:3px;color:white;text-align:center;font:bold 11px/14px Arial}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"><main><a href="/">← Panel Nowaczyk Transport</a><h1>Centrum floty</h1><p class="muted">Pozycje i statusy kierowców z telemetrii ETS2.</p><div class="panel"><h2>Pozycje pojazdów</h2><p id="state" class="muted">Ładowanie…</p>
 <div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Pozycja</th><th>Ładunek</th><th>Prędkość</th><th>Trasa</th><th>Ostatnia dostawa</th></tr></thead><tbody id="rows"></tbody></table></div></div><section class="panel" id="mapPanel">
-<h2>Mapa kierowców</h2><p class="muted">ProMods 2.83 · miasta i parkingi pojawiają się przy zbliżeniu.</p>
+<h2>Mapa kierowców</h2><p class="muted">Domyślnie pełny podkład ProMods 2.68. W menu warstw jest też podgląd 2.83 z miastami i parkingami. W podglądzie brakuje geometrii niektórych skrzyżowań.</p>
 <div class="fleet-map-tools"><label>Kierowca <select id="mapDriver"><option value="">Wybierz kierowcę</option></select></label><button id="fullscreen" type="button">Pełny ekran</button><span id="mapStatus" class="muted" role="status"></span></div>
 <p id="mapError" class="muted" role="status" hidden></p>
 <div id="fleetMap" aria-label="Mapa ProMods z pozycjami kierowców"></div>
@@ -53,16 +53,58 @@ function initMap(){
  tiles.on('tileerror',()=>showMapError('Część kafelków ProMods jest niedostępna. Możesz otworzyć mapę źródłową z linku poniżej.'));
  tiles.on('tileload',()=>showMapError(''));
  const roads=L.layerGroup();
- const tileSpan=76000;
- for(const [x,z] of [[0, 0], [0, 1], [0, 2], [0, 3], [1, 0], [1, 1], [1, 2], [1, 3], [2, 0], [2, 1], [2, 2], [2, 3], [3, 2], [3, 3]]){
-  const left=-135000+x*tileSpan,top=-166000+z*tileSpan;
-  const tileBounds=[[-(top+tileSpan),left],[-top,left+tileSpan]];
-  L.imageOverlay('/promods-283/2-'+x+'-'+z+'.png',tileBounds)
-   .on('error',()=>showMapError('Nie udało się wczytać części podkładu ProMods 2.83.'))
-   .addTo(roads);
+ const sections=["0-0", "1-1", "1-2", "1-3", "1-4", "1-5", "1-6", "2-2", "2-3", "2-4", "2-5", "2-6", "3-1", "3-2", "3-3", "3-4", "3-5", "3-6", "4-0", "4-1", "4-2", "4-3", "4-4", "4-5", "4-6", "5-1", "5-2", "5-3", "5-4", "5-5", "5-6", "6-5", "6-6", "7-4", "7-5"];
+ const shown=new Map();
+ const drawingBounds=[[-138000,-135000],[166000,169000]];
+ const namespace='http://www.w3.org/2000/svg';
+ function renderRoads(){
+  if(!fleetMap.hasLayer(roads)){
+   for(const layer of shown.values())if(layer instanceof L.Layer)roads.removeLayer(layer);
+   shown.clear();
+   return;
+  }
+  const view=fleetMap.getBounds().pad(0.25);
+  for(const key of sections){
+   const [x,z]=key.split('-').map(Number);
+   const left=-135000+x*38000,top=-166000+z*38000;
+   const area=L.latLngBounds([-(top+48000),left-10000],[-top+10000,left+48000]);
+   if(!view.intersects(area)){
+    const layer=shown.get(key);
+    if(layer instanceof L.Layer)roads.removeLayer(layer);
+    shown.delete(key);
+    continue;
+   }
+   if(shown.has(key))continue;
+   const request={};
+   shown.set(key,request);
+   fetch('/promods-283/lines-'+key+'.txt').then(response=>{
+    if(!response.ok)throw Error('Brak danych dróg');
+    return response.text();
+   }).then(data=>{
+    if(shown.get(key)!==request)return;
+    const svg=document.createElementNS(namespace,'svg');
+    svg.setAttribute('viewBox','-135000 -166000 304000 304000');
+    const path=document.createElementNS(namespace,'path');
+    path.setAttribute('d',data);
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke','#a9bed3');
+    path.setAttribute('stroke-width','1.5');
+    path.setAttribute('stroke-linecap','round');
+    path.setAttribute('vector-effect','non-scaling-stroke');
+    svg.append(path);
+    const overlay=L.svgOverlay(svg,drawingBounds);
+    shown.set(key,overlay);
+    roads.addLayer(overlay);
+   }).catch(()=>{
+    if(shown.get(key)!==request)return;
+    shown.delete(key);
+    showMapError('Nie udało się wczytać części dróg ProMods 2.83.');
+   });
+  }
  }
- roads.addTo(fleetMap);
- L.control.layers({'ProMods 2.83':roads,'ProMods 2.68 · Charlws':tiles}).addTo(fleetMap);
+ tiles.addTo(fleetMap);
+ L.control.layers({'ProMods 2.83 · podgląd':roads,'ProMods 2.68 · pełny podkład':tiles}).addTo(fleetMap);
+ fleetMap.on('moveend baselayerchange',renderRoads);
  const places=L.layerGroup().addTo(roads);
  const parkingIcon=L.divIcon({className:'parking-pin',html:'P',iconSize:[16,16]});
  const cityIcon=L.divIcon({className:'city-anchor',iconSize:[1,1]});
