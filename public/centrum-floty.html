@@ -7,9 +7,11 @@
 .driver-pin .offline{background:#747e90}
 .fleet-map-tools{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
 .fleet-map-tools select{max-width:100%;font:inherit}
+.city-label.leaflet-tooltip{background:#132033e8;border:0;color:#fff;font-weight:600;padding:2px 4px;box-shadow:none}
+.parking-pin{background:#2662a0;border:1px solid white;border-radius:3px;color:white;text-align:center;font:bold 11px/14px Arial}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"><main><a href="/">← Panel Nowaczyk Transport</a><h1>Centrum floty</h1><p class="muted">Pozycje i statusy kierowców z telemetrii ETS2.</p><div class="panel"><h2>Pozycje pojazdów</h2><p id="state" class="muted">Ładowanie…</p>
 <div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Pozycja</th><th>Ładunek</th><th>Prędkość</th><th>Trasa</th><th>Ostatnia dostawa</th></tr></thead><tbody id="rows"></tbody></table></div></div><section class="panel" id="mapPanel">
-<h2>Mapa kierowców</h2><p class="muted">ProMods 2.83 · podkład dróg. Niektóre sektory i skrzyżowania mogą mieć przerwy. Starszy podkład możesz wybrać w menu warstw.</p>
+<h2>Mapa kierowców</h2><p class="muted">ProMods 2.83 · miasta i parkingi pojawiają się przy zbliżeniu.</p>
 <div class="fleet-map-tools"><label>Kierowca <select id="mapDriver"><option value="">Wybierz kierowcę</option></select></label><button id="fullscreen" type="button">Pełny ekran</button><span id="mapStatus" class="muted" role="status"></span></div>
 <p id="mapError" class="muted" role="status" hidden></p>
 <div id="fleetMap" aria-label="Mapa ProMods z pozycjami kierowców"></div>
@@ -60,7 +62,38 @@ function initMap(){
    .addTo(roads);
  }
  roads.addTo(fleetMap);
- L.control.layers({'ProMods 2.83 · drogi':roads,'ProMods 2.68 · Charlws':tiles}).addTo(fleetMap);
+ L.control.layers({'ProMods 2.83':roads,'ProMods 2.68 · Charlws':tiles}).addTo(fleetMap);
+ const places=L.layerGroup().addTo(roads);
+ const parkingIcon=L.divIcon({className:'parking-pin',html:'P',iconSize:[16,16]});
+ const cityIcon=L.divIcon({className:'city-anchor',iconSize:[1,1]});
+ fetch('/promods-283/places.json').then(response=>{
+  if(!response.ok)throw Error('Brak danych mapy');
+  return response.json();
+ }).then(data=>{
+  function renderPlaces(){
+   places.clearLayers();
+   if(!fleetMap.hasLayer(roads))return;
+   const zoom=fleetMap.getZoom(),bounds=fleetMap.getBounds().pad(0.1);
+   if(zoom>=3){
+    for(const [name,x,z] of data.cities){
+     const point=[-z,x];
+     if(!bounds.contains(point))continue;
+     const label=document.createElement('span');
+     label.textContent=name;
+     L.marker(point,{icon:cityIcon,interactive:false,keyboard:false})
+      .bindTooltip(label,{permanent:true,direction:'center',className:'city-label'}).addTo(places);
+    }
+   }
+   if(zoom>=5){
+    for(const [x,z] of data.parking){
+     const point=[-z,x];
+     if(bounds.contains(point))L.marker(point,{icon:parkingIcon,title:'Parking',alt:'Parking'}).bindTooltip('Parking').addTo(places);
+    }
+   }
+  }
+  fleetMap.on('moveend baselayerchange',renderPlaces);
+  renderPlaces();
+ }).catch(()=>showMapError('Nie udało się wczytać miast i parkingów.'));
  fleetMap.on('baselayerchange',()=>showMapError(''));
 }
 function routeLabel(p){
