@@ -115,7 +115,8 @@ function revokeAccountSessions(db,id){
  }
 }
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
-function canDispatch(req){return ['admin','dispatcher','boss'].includes(who(req)?.role)}
+function isSubcontractorBoss(req){const me=who(req);return me?.role==='boss'&&me.companyId!==MAIN_COMPANY_ID}
+function canDispatch(req){return auth(req)||who(req)?.role==='dispatcher'}
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
 function body(req){
  return new Promise((resolve,reject)=>{
@@ -146,6 +147,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();
  const key=sessionKey(req);
  req[requestSession]=key?db.authSessions?.[key]:null;
+ if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&
+    !['/api/accounts/me','/api/accounts/login','/api/accounts/password','/api/logout','/api/admin/applications','/api/companies','/api/me'].includes(u.pathname)){
+  return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji własnej firmy.'});
+ }
+
  // Centrum floty: dane pozycji z uwierzytelnionego konta; NIE jest to jeszcze integracja z ETS2.
  if(u.pathname==='/api/client-release'&&method==='GET'){let url='https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download/Nowaczyk-Transport-Setup.exe';try{const candidate=new URL(process.env.TELEMETRY_DOWNLOAD_URL||'');if(candidate.protocol==='https:')url=candidate.href}catch{}return send(res,200,{version:'0.3.4',available:!!url,url})}
  if(u.pathname==='/api/tachograph'&&['GET','POST'].includes(method)){
@@ -265,7 +271,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/trailers'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const list=db.trailers||[];
-  if(['admin','dispatcher','boss'].includes(me.role))return send(res,200,{trailers:list,assignees:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
+  if(canDispatch(req))return send(res,200,{trailers:list,assignees:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{trailers:list.filter(t=>t.assigneeId===me.id)});
  }
  if(u.pathname==='/api/trailers'&&method==='POST'){
@@ -316,7 +322,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const admin=auth(req)&&u.searchParams.get('mine')!=='1',name=me.username.toLowerCase();
   const wallets=db.wallets||{},orders=db.shopOrders||[],payments=db.payments||[],rates=db.driverRates||{};
-  const history=[...payments.map(p=>({id:p.id,driver:p.driver,type:'wypłata',description:'Wypłata za '+p.month,amount:Number(p.amount),createdAt:p.createdAt,bonus:Number(p.bonus||0),deduction:Number(p.deduction||0)})),...orders.filter(o=>o.status==='Zatwierdzone').map(o=>({id:o.id,driver:o.driver,type:'zakup',description:o.name,amount:-Number(o.price),createdAt:o.decidedAt||o.createdAt})),...(db.fines||[]).map(f=>({id:f.id,driver:f.driver,type:'mandat',description:f.reason,amount:-Number(f.amount),createdAt:f.createdAt}))].filter(x=>admin||x.driver===name).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const history=[...payments.map(p=>({id:p.id,driver:p.driver,type:'wypłata',description:'Wypłata za '+p.month,amount:Number(p.amount),createdAt:p.createdAt,bonus:Number(p.bonus||0),deduction:Number(p.deduction||0)})),...orders.filter(o=>o.status==='Zatwierdzone'&&o.category!=='lights').map(o=>({id:o.id,driver:o.driver,type:'zakup',description:o.name,amount:-Number(o.price),createdAt:o.decidedAt||o.createdAt})),...(db.fines||[]).map(f=>({id:f.id,driver:f.driver,type:'mandat',description:f.reason,amount:-Number(f.amount),createdAt:f.createdAt}))].filter(x=>admin||x.driver===name).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
 
   return send(res,200,{wallets:admin?wallets:{[name]:wallets[name]||0},orders:admin?orders:orders.filter(x=>x.driver===name),payments:admin?payments:payments.filter(x=>x.driver===name),rates:admin?rates:{[name]:rates[name]??0.7},items:db.shopItems||[],history,earnings:(db.routes||[]).filter(r=>r.settledAt&&(admin||r.driver.toLowerCase()===name)).map(r=>({id:r.id,driver:r.driver,km:r.drivenKm,rate:r.payRate??0.7,earned:Math.round(r.drivenKm*(r.payRate??0.7)*100)/100,settledAt:r.settledAt}))});
  }
@@ -346,6 +352,22 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!name||!Number.isFinite(price)||price<=0||price>1000000)return send(res,400,{error:'Nieprawidłowy produkt'});
   db.shopItems??=[];const item={id:crypto.randomUUID(),name,price:Math.round(price*100)/100};db.shopItems.push(item);await save(db);return send(res,201,item);
  }
+ if(u.pathname==='/api/economy/lights'&&['GET','POST'].includes(method)){
+  const me=who(req);
+  if(!canDrive(req))return send(res,403,{error:'Tylko kierowca'});
+  const driver=me.username.toLowerCase();
+  db.shopOrders??=[];
+  if(method==='GET')return send(res,200,db.shopOrders.filter(order=>order.category==='lights'&&order.driver===driver));
+  const a=await body(req),name=str(a.name,100),unitPrice=a.unitPrice,quantity=a.quantity;
+  const cents=Math.round(unitPrice*100);
+  if(!name||!Number.isFinite(unitPrice)||cents<1||!Number.isSafeInteger(quantity)||quantity<1||quantity>1000||cents*quantity>100000000){
+   return send(res,400,{error:'Podaj nazwę, poprawną cenę za sztukę i ilość.'});
+  }
+  const order={id:crypto.randomUUID(),driver,category:'lights',name,unitPrice:cents/100,quantity,price:cents*quantity/100,status:'Oczekuje',createdAt:new Date().toISOString()};
+  db.shopOrders.push(order);
+  await save(db);
+  return send(res,201,order);
+ }
  if(u.pathname==='/api/economy/order'&&method==='POST'){
   const me=who(req);if(!me||!['driver','probation','admin'].includes(me.role))return send(res,403,{error:'Tylko kierowca'});
   const a=await body(req),item=(db.shopItems||[]).find(x=>x.id===a.itemId);
@@ -358,7 +380,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!order)return send(res,404,{error:'Nie znaleziono zamówienia'});
   if(order.status!=='Oczekuje')return send(res,409,{error:'Zamówienie już rozpatrzone'});
   if(!['Zatwierdzone','Odrzucone'].includes(a.status))return send(res,400,{error:'Nieprawidłowa decyzja'});
-  if(a.status==='Zatwierdzone'){db.wallets??={};const balance=db.wallets[order.driver]||0;if(balance<order.price)return send(res,409,{error:'Za mało środków kierowcy'});db.wallets[order.driver]=Math.round((balance-order.price)*100)/100;}
+  if(a.status==='Zatwierdzone'&&order.category!=='lights'){db.wallets??={};const balance=db.wallets[order.driver]||0;if(balance<order.price)return send(res,409,{error:'Za mało środków kierowcy'});db.wallets[order.driver]=Math.round((balance-order.price)*100)/100;}
   order.status=a.status;order.decidedAt=new Date().toISOString();await save(db);return send(res,200,order);
  }
  if(u.pathname==='/api/economy/fine'&&method==='POST'){
@@ -683,15 +705,17 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/me')return send(res,200,{admin:auth(req)});
  if(u.pathname.startsWith('/api/admin/')){
-  if(!auth(req))return send(res,401,{error:'Zaloguj się jako administrator.'});
+  const recruiter=isSubcontractorBoss(req)&&u.pathname==='/api/admin/applications';
+  if(!auth(req)&&!recruiter)return send(res,401,{error:'Zaloguj się jako administrator.'});
   if(u.pathname==='/api/admin/applications'&&method==='GET'){
    const cutoff=Date.now()-24*60*60*1000;
-   return send(res,200,db.applications.filter(x=>x.status!=='Przyjęte'||!(Date.parse(x.acceptedAt||x.date)<=cutoff)));
+   return send(res,200,db.applications.filter(x=>(!recruiter||x.companyId===who(req).companyId)&&(x.status!=='Przyjęte'||!(Date.parse(x.acceptedAt||x.date)<=cutoff))));
   }
   if(u.pathname==='/api/admin/companies'&&method==='GET')return send(res,200,db.companies);
   if(u.pathname==='/api/admin/applications'&&method==='PATCH'){
    const a=await body(req),x=db.applications.find(x=>x.id===a.id);
-   if(!x)return send(res,404,{error:'Nie znaleziono podania'});
+   if(!x||(recruiter&&x.companyId!==who(req).companyId))return send(res,404,{error:'Nie znaleziono podania'});
+   if(recruiter&&(a.status!=='Przyjęte'||x.status!=='Nowe'||Object.hasOwn(a,'companyId')))return send(res,403,{error:'Możesz przyjąć tylko nowe podanie do własnej firmy.'});
    if(a.status&&!['Nowe','Przyjęte','Odrzucone'].includes(a.status))return send(res,400,{error:'Niepoprawny status'});
    if(a.companyId&&!db.companies.some(c=>c.id===a.companyId))return send(res,400,{error:'Nieznana firma'});
    if(a.status&&x.status!==a.status){
@@ -715,11 +739,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,404,{error:'Nie znaleziono'});
  }
  if(method!=='GET')return send(res,405,{error:'Metoda niedozwolona'});
- const homePath=auth(req)?'/system.html':canDispatch(req)?'/spedytor.html':canDrive(req)?'/moj-panel.html':'/system-login.html';
+ const homePath=auth(req)?'/system.html':isSubcontractorBoss(req)?'/admin.html':canDispatch(req)?'/spedytor.html':canDrive(req)?'/moj-panel.html':'/system-login.html';
  if(['/','/system','/index.html','/login.html'].includes(u.pathname)||(u.pathname==='/system-login.html'&&homePath!==u.pathname)){
   res.writeHead(302,{Location:homePath,'Cache-Control':'no-store'});return res.end();
  }
- if(u.pathname==='/admin.html'&&!auth(req)){
+ if(u.pathname==='/admin.html'&&!auth(req)&&!isSubcontractorBoss(req)){
   if(who(req))return send(res,403,{error:'Panel rekrutacji jest dostępny dla kierownictwa.'});
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
  }
