@@ -1,6 +1,6 @@
 <!doctype html><html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Użytkownicy</title>
 <style>body{font-family:Segoe UI,Arial;background:#edf2f7;color:#1b3047;margin:0}header{background:#14263b;color:white;padding:22px 5%}main{max-width:1000px;margin:30px auto;padding:0 16px}.panel{background:white;border-radius:14px;padding:24px;margin:16px 0;box-shadow:0 4px 20px #22334412}input,select{padding:12px;border:1px solid #bbc9d6;border-radius:7px;max-width:100%;width:100%}label{display:block;margin:10px 0}button{background:#208ded;color:white;border:0;border-radius:7px;padding:11px 16px;cursor:pointer}table{width:100%;border-collapse:collapse}td,th{padding:12px;border-bottom:1px solid #ddd;text-align:left}#message{font-weight:bold}</style>
-<header><h1>Nowaczyk Transport — Role pracowników</h1><a href="/system.html" style="color:white">← Centrum operacyjne</a></header><main><section class="panel"><h2>Utwórz konto</h2><form id="create"><label>Login<input id="username" required minlength="3" maxlength="50" pattern="[A-Za-z0-9._-]+"></label><label>Hasło początkowe (minimum 12 znaków)<input id="password" type="password" required minlength="12" autocomplete="new-password"></label><label>Rola<select id="role"><option value="driver">Kierowca</option><option value="probation">Kierowca na okresie próbnym</option><option value="dispatcher">Spedytor</option><option value="mechanic">Mechanik</option><option value="boss">Szef</option><option value="subcontractor">Szef podwykonawcy</option><option value="admin">Administrator</option></select></label><label>Identyfikator firmy<input id="companyId" value="nowaczyk" required></label><button>Utwórz konto</button></form><p id="message" role="status"></p></section><section class="panel"><h2>Istniejące konta</h2><div style="overflow:auto"><table><thead><tr><th>Login</th><th>Rola</th><th>Firma</th><th>Status</th><th>Akcja</th></tr></thead><tbody id="list"></tbody></table></div></section></main>
+<header><h1>Nowaczyk Transport — Role pracowników</h1><a href="/system.html" style="color:white">← Centrum operacyjne</a></header><main><section class="panel"><h2>Utwórz konto</h2><form id="create"><label>Login<input id="username" required minlength="3" maxlength="50" pattern="[A-Za-z0-9._-]+"></label><label>Hasło początkowe (minimum 12 znaków)<input id="password" type="password" required minlength="12" autocomplete="new-password"></label><label>Rola<select id="role"><option value="driver">Kierowca</option><option value="probation">Kierowca na okresie próbnym</option><option value="dispatcher">Dyspozytor</option><option value="mechanic">Mechanik</option><option value="boss">Szef</option><option value="subcontractor">Szef podwykonawcy</option><option value="admin">Administrator</option></select></label><label><input style="width:auto" type="checkbox" id="dispatchAccess"> Dodaj rolę Dyspozytor do konta kierowcy</label><label>Identyfikator firmy<input id="companyId" value="nowaczyk" required></label><button>Utwórz konto</button></form><p id="message" role="status"></p></section><section class="panel"><h2>Istniejące konta</h2><div style="overflow:auto"><table><thead><tr><th>Login</th><th>Rola</th><th>Firma</th><th>Status</th><th>Akcja</th></tr></thead><tbody id="list"></tbody></table></div></section></main>
 <dialog id="resetDialog" aria-labelledby="resetTitle">
 <form id="resetForm">
 <h2 id="resetTitle">Ustaw nowe hasło</h2>
@@ -52,6 +52,18 @@ if(x.role!=='admin'){
  roleCell.append(select);
 }
 cell(x.companyId);cell(x.active?'Aktywne':'Zablokowane');const td=document.createElement('td');if(x.role!=='admin'){const b=document.createElement('button');b.textContent=x.active?'Zablokuj':'Odblokuj';b.onclick=async()=>{try{await api('/api/accounts/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:x.username,active:!x.active})});refresh()}catch(e){msg.textContent=e.message}};td.append(b)}
+if(x.role==='driver'){
+ const toggle=document.createElement('button');
+ toggle.textContent=x.dispatchAccess?'Usuń rolę Dyspozytor':'Dodaj rolę Dyspozytor';
+ toggle.onclick=async()=>{
+  toggle.disabled=true;
+  try{
+   await api('/api/accounts/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:x.username,dispatchAccess:!x.dispatchAccess})});
+   await refresh();
+  }catch(error){msg.textContent=error.message;toggle.disabled=false}
+ };
+ td.append(' ',toggle);
+}
 if(['driver','probation'].includes(x.role)){
  const reset=document.createElement('button');
  reset.textContent='Ustaw hasło';
@@ -76,5 +88,5 @@ if(['driver','probation'].includes(x.role)){
  td.append(' ',remove);
 }
 tr.append(td);tb.append(tr)}}catch(e){msg.textContent=e.message}}
-document.getElementById('create').onsubmit=async e=>{e.preventDefault();try{await api('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value,role:role.value,companyId:companyId.value})});msg.textContent='Konto utworzone';e.target.reset();refresh()}catch(err){msg.textContent=err.message}};api('/api/accounts/me').then(({user})=>{if(user?.role==='boss')document.querySelector('#role option[value=admin]').remove();refresh()}).catch(e=>{msg.textContent=e.message});
+document.getElementById('create').onsubmit=async e=>{e.preventDefault();try{await api('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value,role:role.value,dispatchAccess:document.getElementById("dispatchAccess").checked,companyId:companyId.value})});msg.textContent='Konto utworzone';e.target.reset();refresh()}catch(err){msg.textContent=err.message}};api('/api/accounts/me').then(({user})=>{if(user?.role==='boss')document.querySelector('#role option[value=admin]').remove();refresh()}).catch(e=>{msg.textContent=e.message});
 </script></html>

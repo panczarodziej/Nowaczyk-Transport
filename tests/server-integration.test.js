@@ -38,6 +38,15 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await fetch(base+'/spedytor.html',{headers:{Cookie:dispatcher.cookie}})).status,200);
  assert.equal((await fetch(base+'/moj-panel.html',{headers:{Cookie:login.cookie}})).status,200);
  assert.equal((await fetch(base+'/spedytor.html',{headers:{Cookie:login.cookie}})).status,403);
+ const dual=await req('/api/accounts/update',{username:'driver1',dispatchAccess:true},admin.cookie);
+ assert.equal(dual.data.dispatchAccess,true);
+ for(const page of ['/moj-panel.html','/trasy.html','/centrum-floty.html']){
+  assert.equal((await fetch(base+page,{headers:{Cookie:login.cookie},redirect:'manual'})).status,200);
+ }
+ assert.equal((await req('/api/fleet/positions',null,login.cookie)).status,200);
+ assert.equal((await req('/api/accounts',null,login.cookie)).status,403);
+ assert.equal((await req('/api/accounts/update',{username:'driver1',dispatchAccess:false},admin.cookie)).data.dispatchAccess,false);
+ assert.equal((await req('/api/fleet/positions',null,login.cookie)).status,403);
  const updated=await req('/api/accounts/update',{username:'dispatcher1',role:'boss'},admin.cookie);
  assert.equal(updated.data.role,'boss');
  assert.equal((await fetch(base+'/spedytor.html',{headers:{Cookie:dispatcher.cookie}})).status,200);
