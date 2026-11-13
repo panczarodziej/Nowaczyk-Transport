@@ -89,10 +89,6 @@ async function syncTelemetry(){
 }
 async function syncTelemetryInner(){
  const account=await driverRequest('/api/accounts/me');captureDriver=account.user?.username?.toLowerCase()||null;if(!captureDriver)return {ok:false,error:'Zaloguj się w panelu kierowcy'};
- const t=lastTelemetry;const fresh=t&&Date.now()-t.receivedAt<=15000;
- const hasPosition=fresh&&[t.worldX,t.worldZ].every(Number.isFinite);
- const result=hasPosition?await driverRequest('/api/fleet/position',{method:'POST',body:JSON.stringify({x:t.worldX,z:t.worldZ,speedKmh:Math.max(0,Math.min(200,t.speedKmh||0)),activity:t.paused?'Gra wstrzymana':t.speedKmh>=3?'Jazda':'Postój',city:'',place:t.paused?'Gra wstrzymana':'Telemetria ETS2',cargo:t.cargo,cargoMassKg:t.cargoMassKg,odometerKm:t.odometerKm,onJob:t.onJob,cargoLoaded:t.cargoLoaded})}):{ok:false,error:'Czytnik nie podał współrzędnych ETS2'};
- // Przekazuj zdarzenia niezależnie od rozliczeń. Zachowaj kolejkę przy błędzie serwera.
  let sentEvents=0;
  for(const ev of pendingEvents.filter(e=>e.driver===captureDriver).slice(0,10)){
   try{const reply=await driverRequest('/api/telemetry/events',{method:'POST',body:JSON.stringify(ev)});
@@ -100,6 +96,9 @@ async function syncTelemetryInner(){
    if(ev.type==='job-delivered'&&win&&!win.isDestroyed())win.webContents.send('driver-routes-changed');
   }catch{break}
  }
+ const t=lastTelemetry;const fresh=t&&Date.now()-t.receivedAt<=15000;
+ const hasPosition=fresh&&[t.worldX,t.worldZ].every(Number.isFinite);
+ const result=hasPosition?await driverRequest('/api/fleet/position',{method:'POST',body:JSON.stringify({x:t.worldX,z:t.worldZ,speedKmh:Math.max(0,Math.min(200,t.speedKmh||0)),activity:t.paused?'Gra wstrzymana':t.speedKmh>=3?'Jazda':'Postój',city:'',place:t.paused?'Gra wstrzymana':'Telemetria ETS2',cargo:t.cargo,cargoMassKg:t.cargoMassKg,odometerKm:t.odometerKm,onJob:t.onJob,cargoLoaded:t.cargoLoaded})}):{ok:false,error:'Czytnik nie podał współrzędnych ETS2'};
  const outcome=result.ok?{ok:true,driver:result.position?.driver,verified:false,sentEvents}:{...result,sentEvents};return outcome;
 }
 function create(){const s=settings();win=new BrowserWindow({width:680,height:650,minWidth:560,minHeight:500,show:false,icon:path.join(__dirname,'icon.png'),webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false}});win.loadFile('ui.html');win.once('ready-to-show',()=>{if(!((process.argv.includes('--minimized')||s.startMinimized)&&app.getLoginItemSettings().wasOpenedAtLogin))win.show()});win.on('close',e=>{if(!app.isQuitting){e.preventDefault();win.hide()}});
