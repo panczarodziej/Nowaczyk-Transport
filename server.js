@@ -669,6 +669,23 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:acct?.companyId||MAIN_COMPANY_ID});
   await save(db);return send(res,200,v);
  }
+ if(u.pathname==='/api/fleet/sell'&&method==='POST'){
+  if(!auth(req))return send(res,403,{error:'Sprzedaż jest dostępna dla głównego szefa i administratora.'});
+  const {id,amount}=await body(req);
+  if(typeof amount!=='string'||!/^(0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(amount)||Number(amount)<=0)return send(res,400,{error:'Podaj cenę sprzedaży w PLN.'});
+  const index=(db.fleet||[]).findIndex(vehicle=>vehicle.id===id);
+  if(index<0)return send(res,404,{error:'Pojazdu nie ma już we flocie.'});
+  const vehicle=db.fleet[index];
+  const companyId=vehicle.companyId||MAIN_COMPANY_ID;
+  const soldAt=new Date().toISOString(),price=Number(amount);
+  db.fleetSales??=[];
+  db.ledger??=[];
+  db.fleetSales.push({...vehicle,companyId,soldAt,price,soldBy:who(req).username});
+  db.ledger.push({id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,type:'sprzedaz_pojazdu',description:vehicle.model+' · '+vehicle.plate,amount:price,createdAt:soldAt});
+  db.fleet.splice(index,1);
+  await save(db);
+  return send(res,200,{ok:true,price,companyId});
+ }
  if(['/api/accounts/login','/api/desktop/login'].includes(u.pathname)&&method==='POST'){
   const desktop=u.pathname==='/api/desktop/login';
   const sessionLifetimeSeconds=desktop?desktopSessionLifetimeSeconds:webSessionLifetimeSeconds;
