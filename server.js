@@ -147,7 +147,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();
  const key=sessionKey(req);
  req[requestSession]=key?db.authSessions?.[key]:null;
- if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&
+ const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
+ if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
     !['/api/accounts/me','/api/accounts/login','/api/accounts/password','/api/logout','/api/admin/applications','/api/companies','/api/me'].includes(u.pathname)){
   return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji i mapy własnej firmy.'});
@@ -756,12 +757,12 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/me')return send(res,200,{admin:auth(req)});
  if(u.pathname.startsWith('/api/admin/')){
   const recruiter=isSubcontractorBoss(req)&&u.pathname==='/api/admin/applications';
-  if(!auth(req)&&!recruiter)return send(res,401,{error:'Zaloguj się jako administrator.'});
+  if(!auth(req)&&!recruiter&&!subcontractorCompanySettings)return send(res,401,{error:'Zaloguj się jako administrator.'});
   if(u.pathname==='/api/admin/applications'&&method==='GET'){
    const cutoff=Date.now()-24*60*60*1000;
    return send(res,200,db.applications.filter(x=>(!recruiter||x.companyId===who(req).companyId)&&(x.status!=='Przyjęte'||!(Date.parse(x.acceptedAt||x.date)<=cutoff))));
   }
-  if(u.pathname==='/api/admin/companies'&&method==='GET')return send(res,200,db.companies);
+  if(u.pathname==='/api/admin/companies'&&method==='GET')return send(res,200,subcontractorCompanySettings?db.companies.filter(company=>company.id===who(req).companyId):db.companies);
   if(u.pathname==='/api/admin/applications'&&method==='PATCH'){
    const a=await body(req),x=db.applications.find(x=>x.id===a.id);
    if(!x||(recruiter&&x.companyId!==who(req).companyId))return send(res,404,{error:'Nie znaleziono podania'});
@@ -782,7 +783,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const x={id,name,bases:[str(a.city,90)||'Nie podano'],open:true,logo:''};db.companies.push(x);await save(db);return send(res,201,x);
   }
   if(u.pathname==='/api/admin/companies'&&method==='PATCH'){
-   const a=await body(req),x=db.companies.find(c=>c.id===a.id);if(!x)return send(res,404,{error:'Brak firmy'});
+   const a=await body(req),x=db.companies.find(c=>c.id===a.id);if(!x||(subcontractorCompanySettings&&x.id!==who(req).companyId))return send(res,404,{error:'Brak firmy'});
    if(typeof a.open==='boolean')x.open=a.open;
    if(Array.isArray(a.bases))x.bases=a.bases.map(y=>str(y,90)).filter(Boolean).slice(0,12);
    if(typeof a.logo==='string'&&(/^data:image\/(png|jpeg|webp);base64,[\w+/=]+$/.test(a.logo)&&a.logo.length<120000||a.logo===''))x.logo=a.logo;

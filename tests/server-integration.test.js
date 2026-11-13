@@ -84,6 +84,17 @@ test('login → dispatch → nested export → telemetry → driver panel and de
   assert.equal(map.data.positions[0].x,55);
   assert.equal((await fetch(base+'/centrum-floty.html',{headers:{Cookie:bossSession.cookie}})).status,200);
   assert.equal((await req('/api/accounts',companyDriver,bossSession.cookie)).status,403);
+  const companies=await req('/api/admin/companies',null,bossSession.cookie);
+  assert.deepEqual(companies.data.map(c=>c.id),[company.data.id]);
+  const patchCompany=data=>fetch(base+'/api/admin/companies',{method:'PATCH',headers:{Cookie:bossSession.cookie,'Content-Type':'application/json'},body:JSON.stringify(data)});
+  assert.equal((await patchCompany({id:'nowaczyk',open:false})).status,404);
+  const updatedCompany=await (await patchCompany({id:company.data.id,bases:['Mrągowo'],logo:'data:image/png;base64,AA==',open:false})).json();
+  assert.deepEqual(updatedCompany.bases,['Mrągowo']);
+  assert.equal(updatedCompany.logo,'data:image/png;base64,AA==');
+  assert.equal(updatedCompany.open,false);
+  assert.equal((await patchCompany({id:company.data.id,open:true})).status,200);
+  assert.equal((await req('/api/admin/companies',{name:'Inna firma'},bossSession.cookie)).status,403);
+
  }
  assert.equal((await req('/api/routes',null,sub.cookie)).status,403);
  assert.equal((await fetch(base+'/admin.html',{headers:{Cookie:sub.cookie}})).status,200);
