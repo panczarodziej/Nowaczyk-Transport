@@ -97,6 +97,7 @@ async function syncTelemetryInner(){
  for(const ev of pendingEvents.filter(e=>e.driver===captureDriver).slice(0,10)){
   try{const reply=await driverRequest('/api/telemetry/events',{method:'POST',body:JSON.stringify(ev)});
    if(!reply.ok)break;pendingEvents.splice(pendingEvents.indexOf(ev),1);persistEvents();sentEvents++;
+   if(ev.type==='job-delivered'&&win&&!win.isDestroyed())win.webContents.send('driver-routes-changed');
   }catch{break}
  }
  const outcome=result.ok?{ok:true,driver:result.position?.driver,verified:false,sentEvents}:{...result,sentEvents};return outcome;
@@ -104,7 +105,7 @@ async function syncTelemetryInner(){
 function create(){const s=settings();win=new BrowserWindow({width:680,height:650,minWidth:560,minHeight:500,show:false,icon:path.join(__dirname,'icon.png'),webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false}});win.loadFile('ui.html');win.once('ready-to-show',()=>{if(!((process.argv.includes('--minimized')||s.startMinimized)&&app.getLoginItemSettings().wasOpenedAtLogin))win.show()});win.on('close',e=>{if(!app.isQuitting){e.preventDefault();win.hide()}});
  // Ikona zasobnika generowana w kodzie, bez pobierania z internetu.
  const icon=nativeImage.createFromPath(path.join(__dirname,'icon.png'));tray=new Tray(icon);tray.setToolTip('Nowaczyk Transport Telemetry');tray.setContextMenu(Menu.buildFromTemplate([{label:'Pokaż ustawienia',click:()=>win.show()},{label:'Zakończ',click:()=>{app.isQuitting=true;app.quit()}}]));tray.on('double-click',()=>win.show());}
-async function listDriverRoutes(){const origin=baseUrl();const cookies=await driverSession().cookies.get({url:origin});const c=cookies.find(x=>x.name==='ks_session');if(!c)return {ok:false,error:'Zaloguj się w panelu kierowcy'};const r=await fetch(origin+'/api/routes?mine=1',{headers:{Cookie:'ks_session='+c.value},signal:AbortSignal.timeout(9000)});if(r.status===401)return {ok:false,error:'Sesja wygasła. Zaloguj się ponownie formularzem w aplikacji, a potem pobierz zlecenia.'};if(!r.ok)return {ok:false,error:'Nie udało się pobrać zleceń: HTTP '+r.status};const data=await r.json();return {ok:true,routes:Array.isArray(data)?data:[]}}
+async function listDriverRoutes(){const origin=baseUrl();const cookies=await driverSession().cookies.get({url:origin});const c=cookies.find(x=>x.name==='ks_session');if(!c)return {ok:false,error:'Zaloguj się w panelu kierowcy'};const r=await fetch(origin+'/api/routes?mine=1',{headers:{Cookie:'ks_session='+c.value},signal:AbortSignal.timeout(9000)});if(r.status===401)return {ok:false,error:'Sesja wygasła. Zaloguj się ponownie formularzem w aplikacji, a potem pobierz zlecenia.'};if(!r.ok)return {ok:false,error:'Nie udało się pobrać zleceń: HTTP '+r.status};const data=await r.json();return {ok:true,routes:Array.isArray(data)?data.filter(route=>!route.deliveredAt&&!route.settledAt&&route.status!=='Zakończona'):[]}}
 const autoDispatchFile=()=>path.join(app.getPath('userData'),'auto-dispatch.json');
 let autoDispatchBusy=false;
 let autoDispatchMessage='';
