@@ -9,7 +9,7 @@
 .fleet-map-tools select{max-width:100%;font:inherit}
 </style><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"><main><a href="/">← Panel Nowaczyk Transport</a><h1>Centrum floty</h1><p class="muted">Pozycje i statusy kierowców z telemetrii ETS2.</p><div class="panel"><h2>Pozycje pojazdów</h2><p id="state" class="muted">Ładowanie…</p>
 <div style="overflow:auto"><table><thead><tr><th>Kierowca</th><th>Status</th><th>Pozycja</th><th>Ładunek</th><th>Prędkość</th><th>Trasa</th><th>Ostatnia dostawa</th></tr></thead><tbody id="rows"></tbody></table></div></div><section class="panel" id="mapPanel">
-<h2>Mapa kierowców</h2>
+<h2>Mapa kierowców</h2><p class="muted">ProMods 2.83 · podkład dróg. Niektóre sektory i skrzyżowania mogą mieć przerwy. Starszy podkład możesz wybrać w menu warstw.</p>
 <div class="fleet-map-tools"><label>Kierowca <select id="mapDriver"><option value="">Wybierz kierowcę</option></select></label><button id="fullscreen" type="button">Pełny ekran</button><span id="mapStatus" class="muted" role="status"></span></div>
 <p id="mapError" class="muted" role="status" hidden></p>
 <div id="fleetMap" aria-label="Mapa ProMods z pozycjami kierowców"></div>
@@ -44,12 +44,24 @@ function initMap(){
  const scale=256/(maxX-minX);
  const crs=L.extend({},L.CRS.Simple,{transformation:new L.Transformation(scale,-minX*scale,-scale,-minZ*scale)});
  const bounds=L.latLngBounds([-maxZ,minX],[-minZ,maxX]);
- fleetMap=L.map('fleetMap',{crs,minZoom:0,maxZoom:8,maxBounds:bounds,maxBoundsViscosity:1,scrollWheelZoom:true}).setView([0,0],1);
+ const fleetBounds=bounds.pad(0).extend([-138000,-135000]).extend([166000,169000]);
+ fleetMap=L.map('fleetMap',{crs,minZoom:0,maxZoom:8,maxBounds:fleetBounds,maxBoundsViscosity:1,scrollWheelZoom:true}).setView([0,0],1);
  fleetMap.attributionControl.setPrefix('<a href="https://leafletjs.com/">Leaflet</a>');
  const tiles=L.tileLayer('https://map.charlws.com/ets2/promods/tiles/{z}/{x}/{y}.png',{minZoom:0,maxNativeZoom:8,maxZoom:8,bounds,noWrap:true});
  tiles.on('tileerror',()=>showMapError('Część kafelków ProMods jest niedostępna. Możesz otworzyć mapę źródłową z linku poniżej.'));
  tiles.on('tileload',()=>showMapError(''));
- tiles.addTo(fleetMap);
+ const roads=L.layerGroup();
+ const tileSpan=76000;
+ for(const [x,z] of [[0, 0], [0, 1], [0, 2], [0, 3], [1, 0], [1, 1], [1, 2], [1, 3], [2, 0], [2, 1], [2, 2], [2, 3], [3, 2], [3, 3]]){
+  const left=-135000+x*tileSpan,top=-166000+z*tileSpan;
+  const tileBounds=[[-(top+tileSpan),left],[-top,left+tileSpan]];
+  L.imageOverlay('/promods-283/2-'+x+'-'+z+'.png',tileBounds)
+   .on('error',()=>showMapError('Nie udało się wczytać części podkładu ProMods 2.83.'))
+   .addTo(roads);
+ }
+ roads.addTo(fleetMap);
+ L.control.layers({'ProMods 2.83 · drogi':roads,'ProMods 2.68 · Charlws':tiles}).addTo(fleetMap);
+ fleetMap.on('baselayerchange',()=>showMapError(''));
 }
 function routeLabel(p){
  return p.dispatchRoute?[p.dispatchRoute.from,p.dispatchRoute.to].join(' → '):'Brak przyjętej trasy';
