@@ -107,7 +107,7 @@ test('login → dispatch → nested export → telemetry → driver panel and de
   assert.equal((await req('/api/admin/companies',{name:'Inna firma'},bossSession.cookie)).status,403);
 
  }
- assert.equal((await req('/api/routes',null,sub.cookie)).status,403);
+ assert.deepEqual((await req('/api/routes',null,sub.cookie)).data,[]);
  assert.equal((await fetch(base+'/admin.html',{headers:{Cookie:sub.cookie}})).status,200);
  assert.deepEqual((await req('/api/admin/applications',null,sub.cookie)).data.map(a=>a.id),[own.data.id]);
  const acceptApplication=(id,status)=>fetch(base+'/api/admin/applications',{method:'PATCH',headers:{Cookie:sub.cookie,'Content-Type':'application/json'},body:JSON.stringify({id,status})});
@@ -275,6 +275,11 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(approved.status,200);
  assert.equal((await req(review,approval,admin.cookie)).status,409);
  assert.equal(await budgetForSub(),beforePurchase-10025);
+ const license='/api/company/trailer-license';
+ assert.equal((await req(requests,{...cash,kind:'trailer'},sub.cookie)).status,403);
+ assert.equal((await req(license,{reason:'Flota firmy'},sub.cookie)).status,201);
+ assert.equal((await req(license,{companyId:company.data.id,decision:'approved'},sub.cookie)).status,403);
+ assert.equal((await req(license,{companyId:company.data.id,decision:'approved'},admin.cookie)).status,200);
  const lease=await req(requests,{...cash,kind:'trailer',trailerType:'chlodnia',financing:'lease',
   bankCity:'Gdańsk',downPayment:'50',plate:'IGNORED'},sub.cookie);
  assert.equal(lease.status,201);
