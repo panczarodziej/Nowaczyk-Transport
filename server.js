@@ -930,6 +930,28 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const e={id:crypto.randomUUID(),routeId:r.id,companyId:r.companyId,driver:r.driver,type:a.type,country:str(a.country,80),from:str(a.from,120),to:str(a.to,120),place:str(a.place,120),liters:Number(a.liters)||0,amount,currency:'PLN',createdAt:new Date().toISOString()};
   db.expenses??=[];db.expenses.push(e);await save(db);return send(res,201,e);
  }
+ if(u.pathname==='/api/admin/subcontractor-mileage'&&method==='GET'){
+  if(!auth(req))return send(res,403,{error:'Tylko główny szef lub administrator'});
+  const partners=(db.companies||[]).filter(c=>c.id!==MAIN_COMPANY_ID);
+  const items=partners.map(company=>{
+   const routes=(db.routes||[]).filter(r=>r.companyId===company.id);
+   const completed=routes.filter(r=>r.settledAt||r.deliveredAt||r.status==='Zakończona');
+   const km=rows=>Math.round(rows.reduce((sum,r)=>sum+Math.max(0,Number(r.drivenKm)||0),0)*10)/10;
+   const drivers=new Map();
+   for(const route of routes){
+    const key=String(route.driver||'').trim().toLowerCase();if(!key)continue;
+    const item=drivers.get(key)||{driver:route.driver,km:0,completedRoutes:0,allRoutes:0};
+    item.km=Math.round((item.km+Math.max(0,Number(route.drivenKm)||0))*10)/10;
+    item.allRoutes++;if(route.settledAt||route.deliveredAt||route.status==='Zakończona')item.completedRoutes++;
+    drivers.set(key,item);
+   }
+   return {companyId:company.id,companyName:company.name,km:km(routes),completedKm:km(completed),
+    completedRoutes:completed.length,allRoutes:routes.length,drivers:[...drivers.values()].sort((a,b)=>b.km-a.km)};
+  });
+  return send(res,200,{items,totals:{km:Math.round(items.reduce((sum,x)=>sum+x.km,0)*10)/10,
+   completedKm:Math.round(items.reduce((sum,x)=>sum+x.completedKm,0)*10)/10,
+   completedRoutes:items.reduce((sum,x)=>sum+x.completedRoutes,0)}});
+ }
  if(u.pathname==='/api/companies'&&method==='GET')return send(res,200,db.companies.map(({id,name,bases,open,logo})=>({id,name,bases,open,logo})));
  if(u.pathname==='/api/applications'&&method==='POST'){
   if(!rate(req,'apply',5))return send(res,429,{error:'Za dużo prób. Spróbuj później.'});
