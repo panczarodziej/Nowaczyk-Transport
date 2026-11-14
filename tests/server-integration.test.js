@@ -305,6 +305,15 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.ok(managed.trailers.some(v=>v.plate==='GD 12345'));
  assert.ok(managed.expenses.some(x=>x.invoiceNumber==='FV/1'));
  assert.equal((await req('/api/company/management?companyId=nowaczyk',null,sub.cookie)).status,403);
+ const partnerTruck=managed.fleet.find(v=>v.id===approved.data.vehicleId);
+ const partnerTrailer=managed.trailers.find(v=>v.plate==='GD 12345');
+ const assigneeId=managed.drivers.find(a=>a.username==='subdriver').id;
+ assert.equal((await req('/api/fleet',{...partnerTruck,driverAccountId:assigneeId},sub.cookie)).status,200);
+ assert.equal((await req('/api/trailers',{...partnerTrailer,assigneeId},sub.cookie)).status,200);
+ assert.equal((await req('/api/trailers',{...partnerTrailer,id:'',assigneeId},sub.cookie)).status,409);
+ const quote=await req('/api/routes/quote',{plannedKm:100,emptyKm:100,fromCountry:'Polska',toCountry:'Niemcy',trailerType:'firanka'},sub.cookie);
+ assert.equal(quote.data.freight,573.75);
+ assert.equal(quote.data.emptyFreight,127.5);
  const employment='/api/company/employment';
  const employee=managed.drivers.find(driver=>driver.username===companyDriver.username);
  assert.equal((await req(employment,{id:employee.id,companyId:'nowaczyk',action:'dismiss'},sub.cookie)).status,403);
