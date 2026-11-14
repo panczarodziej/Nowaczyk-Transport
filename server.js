@@ -174,6 +174,10 @@ function quoteFreight(km,cargo,tons,trailerType){
  const rate=base+(premium?1.2:0)+Math.min(1.1,Math.max(0,Number(tons)||0)*0.035);
  return roundPLN(Math.max(0,Number(km)||0)*rate);
 }
+let offersCache;
+function marketOffers(){
+ return offersCache??=require('./freight-market').buildOffers(nowaczykMap,nowaczykCities,quoteFreight);
+}
 function str(s,max=100){return typeof s==='string'?s.trim().slice(0,max):''}
 function client(req){return req.socket.remoteAddress||'unknown'}
 const limits=new Map();function rate(req,key,max=10){const k=client(req)+key,now=Date.now(),v=(limits.get(k)||[]).filter(t=>t>now-60000);v.push(now);limits.set(k,v);return v.length<=max}
@@ -586,6 +590,17 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const driver=str(a.driver,100).toLowerCase(),rate=(db.driverRates||{})[driver]??0.7;
   return send(res,200,{freight:quoteFreight(km,a.cargo,tons,a.trailerType),driverPay:roundPLN(km*rate),driverRate:rate,estimated:true});
  }
+ if(u.pathname==='/api/freight-market'&&method==='GET'){
+  if(!canDispatch(req))return send(res,403,{error:'Giełda jest dostępna dla szefa i dyspozytora.'});
+  const filters=['from','to','cargo'].map(key=>normalize(u.searchParams.get(key)||''));
+  const trailer=u.searchParams.get('trailer'),min=Number(u.searchParams.get('min')||0),max=Number(u.searchParams.get('max')||100);
+  const assigned=new Set([...(db.routes||[]),...(db.archivedRoutes||[])].map(r=>r.offerId));
+  const matches=marketOffers().filter(offer=>!assigned.has(offer.id)&&
+   normalize(offer.from+' '+offer.fromCountry+' '+(offer.fromCode||'')).includes(filters[0])&&normalize(offer.to+' '+offer.toCountry+' '+(offer.toCode||'')).includes(filters[1])&&
+   normalize(offer.cargoLabel).includes(filters[2])&&(!trailer||offer.trailerType===trailer)&&offer.cargoTons>=min&&offer.cargoTons<=max);
+  const size=25,page=Math.min(Math.max(1,Math.floor(Number(u.searchParams.get('page'))||1)),Math.max(1,Math.ceil(matches.length/size)));
+  return send(res,200,{total:matches.length,page,size,assign:canAssignRoutes(req),offers:matches.slice((page-1)*size,page*size)});
+ }
  if(u.pathname==='/api/routes/assignees'&&method==='GET'){
   if(!canDispatch(req))return send(res,403,{error:'Brak dostępu do listy kierowców'});
   return send(res,200,[...accounts.values()].filter(a=>a.active&&(['admin','driver','probation'].includes(a.role)||(a.role==='boss'&&a.companyId===MAIN_COMPANY_ID))).map(a=>a.username).sort());
@@ -609,7 +624,12 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/routes'&&method==='POST'){
   if(!who(req))return send(res,401,{error:'Sesja wygasła. Zaloguj się ponownie, aby zapisać trasę.'});
   if(!canAssignRoutes(req))return send(res,403,{error:'Zleceniami zarządza główny szef lub dyspozytor.'});
-  const a=await body(req),from=str(a.from,120),to=str(a.to,120),driver=str(a.driver,100);
+  const input=await body(req),offerId=str(input.offerId,20);
+  const offer=offerId?marketOffers().find(item=>item.id===offerId):null;
+  if(offerId&&!offer)return send(res,404,{error:'Oferta jest niedostępna.'});
+  if(offer&&[...(db.routes||[]),...(db.archivedRoutes||[])].some(r=>r.offerId===offerId))return send(res,409,{error:'Oferta została już przydzielona.'});
+  const a=offer?{...offer,driver:input.driver,catalogProfile:'snapshot'}:input;
+  const from=str(a.from,120),to=str(a.to,120),driver=str(a.driver,100);
   if(!from||!to||!driver)return send(res,400,{error:'Podaj kierowcę, początek i koniec trasy'});
   const account=accounts.get(driver.toLowerCase());
   if(!account?.active||!(['admin','driver','probation'].includes(account.role)||(account.role==='boss'&&account.companyId===MAIN_COMPANY_ID)))return send(res,400,{error:'Wybierz aktywne konto z listy kierowców'});
@@ -626,13 +646,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const sourceCompany=str(a.sourceCompany,120),destinationCompany=str(a.destinationCompany,120);
   const mapSetRoute={};
   if(a.catalogProfile==='snapshot'){
-   const mapSetFrom=cityId(from,nowaczykCities),mapSetTo=cityId(to,nowaczykCities);
+   const mapSetFrom=offer?.mapSetFrom||cityId(from,nowaczykCities),mapSetTo=offer?.mapSetTo||cityId(to,nowaczykCities);
    if(!mapSetCompany(mapSetFrom,sourceCompany)||!mapSetCompany(mapSetTo,destinationCompany))return send(res,400,{error:'Wybierz obie firmy z listy dla właściwych miast na mapie Nowaczyk.'});
    if(mapSetFrom===mapSetTo&&sourceCompany===destinationCompany)return send(res,400,{error:'Wybierz inną firmę rozładunku.'});
    if(!str(a.cargo,120)||!Number.isSafeInteger(plannedKm)||plannedKm<=0)return send(res,400,{error:'Podaj ładunek i planowany dystans w pełnych kilometrach.'});
    Object.assign(mapSetRoute,{mapSetFrom,mapSetTo});
   }
-  const r={...mapSetRoute,id:crypto.randomUUID(),trailerId:trailerId||null,trailerType:trailerType||trailer?.type||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
+  const r={...mapSetRoute,...(offer?{offerId}:{}),id:crypto.randomUUID(),trailerId:trailerId||null,trailerType:trailerType||trailer?.type||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
   db.routes??=[];db.routes.push(r);await save(db);return send(res,201,r);
  }
  if(u.pathname==='/api/routes/progress'&&method==='POST'){
@@ -1088,6 +1108,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/centrum-floty.html'&&!canDispatch(req)&&!isSubcontractorBoss(req)){
   if(who(req))return send(res,403,{error:'Mapa floty jest dostępna dla dyspozytorni.'});
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
+ }
+ if(u.pathname==='/gielda.html'&&!canDispatch(req)){
+  res.writeHead(302,{Location:homePath,'Cache-Control':'no-store'});return res.end();
  }
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:homePath});return res.end()}
  if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/firma.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(['/flota-online.html','/firma.html'].includes(u.pathname)&&!canDispatch(req)&&!(u.pathname==='/firma.html'&&isSubcontractorBoss(req)))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}

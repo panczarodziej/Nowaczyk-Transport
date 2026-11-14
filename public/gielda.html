@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Giełda — Nowaczyk Transport</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#edf2f6;color:#183046;font:14px "Segoe UI",system-ui,sans-serif}
+header{height:62px;background:#073751;color:white;display:flex;align-items:center;padding:0 24px;gap:28px}
+header strong{font-size:16px}header a{color:#c9e4f2}a{color:#146587;text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:190px minmax(0,1fr);min-height:calc(100vh - 62px)}
+aside{background:#073751;padding-top:16px}aside a{display:block;padding:13px 20px;color:#c9e4f2}aside a[aria-current]{background:#0b4b6a;color:white;border-left:4px solid #56c6ec;padding-left:16px}
+main{padding:24px;min-width:0}h1{font-size:25px;margin:0 0 16px}.panel{background:#fff;border:1px solid #d8e3eb;border-radius:8px;margin-bottom:16px}
+.filters{padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:12px;align-items:end}
+label{display:grid;gap:5px;font-weight:600}input,select,button{font:inherit;padding:9px;border:1px solid #b8cbd9;border-radius:5px;min-width:0}
+input,select{width:100%;background:white;color:inherit}button{background:#146587;color:white;border-color:#146587;cursor:pointer;font-weight:600}button.secondary{background:white;color:#146587}button:disabled{opacity:.5;cursor:default}
+.toolbar,.pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px}.scroll{overflow:auto}
+table{border-collapse:collapse;width:100%;min-width:850px}th,td{text-align:left;padding:12px;border-bottom:1px solid #e4ebf1}
+th{background:#e8f0f5;color:#304e64;font-size:12px;text-transform:uppercase}tbody tr:nth-child(even){background:#f8fbfd}
+small{display:block;color:#50677b;margin-top:4px}.amount{white-space:nowrap;color:#135b4c}#status{color:#982e27}#status:empty{display:none}
+dialog{border:1px solid #b8cbd9;border-radius:8px;padding:22px;width:min(420px,95vw)}dialog::backdrop{background:#07375184}dialog form{display:grid;gap:12px}
+@media(max-width:700px){.layout{display:block}aside{display:flex;padding:0;overflow:auto}aside a{white-space:nowrap;padding:10px}main{padding:14px}}
+</style>
+</head>
+<body>
+<header><strong>Nowaczyk Transport</strong><a href="/">Centrum operacyjne</a></header>
+<div class="layout">
+<aside aria-label="Transport"><a href="/gielda.html" aria-current="page">Giełda</a><a href="/trasy.html">Przydzielone trasy</a><a href="/centrum-floty.html">Mapa kierowców</a></aside>
+<main>
+<h1>Giełda</h1>
+<form class="panel filters" id="filters">
+<label>Załadunek<input name="from" placeholder="Miasto lub kraj"></label>
+<label>Rozładunek<input name="to" placeholder="Miasto lub kraj"></label>
+<label>Towar<input name="cargo" placeholder="np. ziemniaki"></label>
+<label>Typ naczepy<select name="trailer"><option value="">Wszystkie</option><option value="firanka">Plandeka</option><option value="chlodnia">Chłodnia</option></select></label>
+<label>Masa od (t)<input name="min" type="number" min="0" max="100" step="0.1"></label>
+<label>Masa do (t)<input name="max" type="number" min="0" max="100" step="0.1"></label>
+<button>Szukaj</button><button class="secondary" type="reset">Wyczyść filtry</button>
+</form>
+<p id="status" role="status"></p>
+<section class="panel" aria-label="Oferty ładunków">
+<div class="toolbar"><strong id="count" aria-live="polite">Pobieranie ofert…</strong><a href="/trasy.html">Dodaj trasę ręcznie</a></div>
+<div class="scroll"><table>
+<thead><tr><th>Załadunek</th><th>Rozładunek</th><th>Ładunek</th><th>Szac. dystans</th><th>Szac. fracht</th><th>Oferta</th></tr></thead>
+<tbody id="offers"></tbody>
+</table></div>
+<div class="pagination"><button class="secondary" id="prev" disabled>Wstecz</button><span id="page"></span><button class="secondary" id="next" disabled>Dalej</button></div>
+</section>
+</main>
+</div>
+<dialog id="assign"><form id="assignment">
+<strong id="selection"></strong>
+<label>Kierowca<select name="driver" required></select></label>
+<p id="assignmentError" role="status"></p>
+<button>Przydziel trasę</button><button class="secondary" id="cancel" type="button">Anuluj</button>
+</form></dialog>
+<script>
+const get=id=>document.getElementById(id);
+const filters=get('filters'),dialog=get('assign'),assignment=get('assignment');
+const number=new Intl.NumberFormat('pl-PL'),pln=new Intl.NumberFormat('pl-PL',{style:'currency',currency:'PLN'});
+let page=1,query=new URLSearchParams(),selected,revision=0;
+function node(tag,value){const el=document.createElement(tag);el.textContent=value;return el}
+async function api(url,data){
+ const res=await fetch(url,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});
+ const payload=await res.json();
+ if(!res.ok)throw Error(payload.error);
+ return payload;
+}
+function place(city,country,company){
+ const cell=node('td',[country,city].join(' · '));
+ cell.append(node('small',company.replaceAll('_',' ')));return cell;
+}
+async function choose(offer){
+ selected=offer;
+ get('selection').textContent=offer.from+' → '+offer.to+' · '+offer.cargoLabel;
+ get('assignmentError').textContent='';
+ const drivers=await api('/api/routes/assignees');
+ assignment.elements.driver.replaceChildren(new Option('Wybierz kierowcę',''),...drivers.map(driver=>new Option(driver,driver)));
+ dialog.showModal();
+}
+async function load(target=1){
+ const current=++revision;
+ try{
+  query.set('page',target);
+  const data=await api('/api/freight-market?'+query);
+  if(current!==revision)return;
+  page=data.page;
+  const pages=Math.max(1,Math.ceil(data.total/data.size));
+  get('count').textContent='Oferty na giełdzie · '+number.format(data.total);
+  get('page').textContent=page+' / '+pages;
+  get('prev').disabled=page<=1;get('next').disabled=page>=pages;
+  const rows=data.offers.map(offer=>{
+   const row=document.createElement('tr');
+   const cargo=node('td',offer.cargoLabel);
+   cargo.append(node('small',offer.cargoTons+' t · '+(offer.trailerType==='chlodnia'?'Chłodnia':'Plandeka')));
+   const freight=node('td',pln.format(offer.freight));freight.className='amount';
+   const action=node('td',offer.id);
+   if(data.assign){
+    const button=node('button','Przydziel');
+    button.onclick=async()=>{button.disabled=true;try{await choose(offer)}catch(error){get('status').textContent=error.message}finally{button.disabled=false}};
+    action.replaceChildren(button);
+   }
+   row.append(place(offer.from,offer.fromCountry,offer.sourceCompany),place(offer.to,offer.toCountry,offer.destinationCompany),cargo,
+    node('td',number.format(offer.plannedKm)+' km'),freight,action);
+   return row;
+  });
+  if(!rows.length){const row=document.createElement('tr'),cell=node('td','Brak ofert dla tych filtrów.');cell.colSpan=6;row.append(cell);rows.push(row)}
+  get('offers').replaceChildren(...rows);
+ }catch(error){if(current===revision)get('status').textContent=error.message}
+}
+filters.onsubmit=event=>{
+ event.preventDefault();
+ const nextQuery=new URLSearchParams(new FormData(filters));
+ const min=nextQuery.get('min'),max=nextQuery.get('max');
+ if(min&&max&&Number(min)>Number(max)){get('status').textContent='Masa minimalna przekracza maksymalną.';return}
+ get('status').textContent='';
+ query=nextQuery;load();
+};
+filters.onreset=()=>{query=new URLSearchParams();get('status').textContent='';load()};
+get('prev').onclick=()=>load(page-1);
+get('next').onclick=()=>load(page+1);
+get('cancel').onclick=()=>dialog.close();
+assignment.onsubmit=async event=>{
+ event.preventDefault();
+ const button=event.submitter;button.disabled=true;
+ try{
+  await api('/api/routes',{offerId:selected.id,driver:assignment.elements.driver.value});
+  dialog.close();
+  get('status').textContent='Trasa przydzielona kierowcy.';
+  await load(page);
+ }catch(error){get('assignmentError').textContent=error.message}
+ finally{button.disabled=false}
+};
+load();
+</script>
+</body>
+</html>
