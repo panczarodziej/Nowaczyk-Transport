@@ -212,7 +212,7 @@ function body(req){
 const roundPLN=n=>Math.round(n*100)/100;
 // Fixed conversion for the virtual economy.
 const EURO_PLN=4.25;
-function quoteFreight(km,trailerType,from,to,emptyKm=0){
+function freightRate(trailerType,from,to){
  const region=value=>{
   const key=normalize(value);
   for(const [area,pattern] of Object.entries({
@@ -224,13 +224,27 @@ function quoteFreight(km,trailerType,from,to,emptyKm=0){
  };
  const origin=region(from),destination=region(to);
  const corridor=origin==='pl'?destination:destination==='pl'?origin:null;
- const rates={de:[1.05,1.225],benelux:[1.075,1.275],fr:[1.125,1.325],it:[1.175,1.375],es:[1.20,1.45],nordic:[1.375,1.625]};
- const loadedRate=(rates[corridor]||[1.05,1.25])[trailerType==='chlodnia'?1:0];
+ const rates={de:[0.95,1.10],benelux:[0.95,1.15],fr:[1.00,1.20],it:[1.05,1.25],es:[1.05,1.30],nordic:[1.20,1.45]};
+ return (rates[corridor]||[0.95,1.10])[trailerType==='chlodnia'?1:0];
+}
+function quoteFreight(km,trailerType,from,to,emptyKm=0){
+ const loadedRate=freightRate(trailerType,from,to);
  return roundPLN((km*loadedRate+emptyKm*0.30)*EURO_PLN);
 }
 let offersCache;
 function marketOffers(){
- return offersCache??=require('./freight-market').buildOffers(nowaczykMap,nowaczykCities,quoteFreight);
+ if(!offersCache){
+  const excluded=new Set(['AM','AZ','EG','GE','IL','IQ','JO','LB','LY','SA','SY','TR','RU']);
+  offersCache=require('./freight-market').buildOffers(nowaczykMap,nowaczykCities,quoteFreight,excluded)
+   .map(o=>({...o,rateEUR:freightRate(o.trailerType,o.fromCountry,o.toCountry)}));
+ }
+ return offersCache;
+}
+function matchesMarketLocation(query,city,country,code){
+ if(!query)return true;
+ const cityName=normalize(city),countryName=normalize(country),countryCode=normalize(code||'');
+ return query===countryName||query===countryCode||cityName.startsWith(query)||
+  query===cityName+' '+countryName||query===cityName+' '+countryCode;
 }
 function str(s,max=100){return typeof s==='string'?s.trim().slice(0,max):''}
 function client(req){return req.socket.remoteAddress||'unknown'}
@@ -280,7 +294,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   }
   for(const r of db.vehicleRequests||[]){
    const label=(r.kind==='trailer'?'Naczepa':'Ciągnik')+' · '+r.model;
-   if(r.status==='pending'&&manager&&scope(r.companyId))add('vehicle',r.id,r.status,'Nowy wniosek · '+companyName(r.companyId)+' · '+label,r.createdAt,'/firma.html#vehicleRequests',auth(req)?{kind:'vehicle',id:r.id,lease:r.financing==='lease',details:[r.brand,r.chassis,r.color,r.emission,r.mileage+' km',(r.amount/100).toFixed(2)+' zł',r.description,r.bankCity,r.plate].filter(Boolean),listing:r.listing}:null);
+   if(r.status==='pending'&&manager&&scope(r.companyId))add('vehicle',r.id,r.status,'Nowy wniosek · '+companyName(r.companyId)+' · '+label,r.createdAt,'/firma.html#vehicleRequests',auth(req)?{kind:'vehicle',id:r.id,lease:r.financing==='lease',details:[r.brand,r.chassis,r.color,r.emission,r.mileage+' km',(r.amount/100).toFixed(2)+' zł',r.description,r.bankCity,r.plate].filter(Boolean),listing:r.listing,cash:r.financing==='cash'}:null);
    if(r.status!=='pending'&&manager&&r.companyId===me.companyId)add('vehicle',r.id,r.status,label+' · '+(r.status==='approved'?'zatwierdzono':'odrzucono'),r.decidedAt,'/firma.html#vehicleRequests');
   }
   for(const o of db.shopOrders||[]){
@@ -788,7 +802,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const trailer=u.searchParams.get('trailer'),min=Number(u.searchParams.get('min')||0),max=Number(u.searchParams.get('max')||100);
   const assigned=new Set([...(db.routes||[]),...(db.archivedRoutes||[])].map(r=>r.offerId));
   const matches=marketOffers().filter(offer=>!assigned.has(offer.id)&&
-   normalize(offer.from+' '+offer.fromCountry+' '+(offer.fromCode||'')).includes(filters[0])&&normalize(offer.to+' '+offer.toCountry+' '+(offer.toCode||'')).includes(filters[1])&&
+   matchesMarketLocation(filters[0],offer.from,offer.fromCountry,offer.fromCode)&&matchesMarketLocation(filters[1],offer.to,offer.toCountry,offer.toCode)&&
    normalize(offer.cargoLabel).includes(filters[2])&&(!trailer||offer.trailerType===trailer)&&offer.cargoTons>=min&&offer.cargoTons<=max);
   const size=25,page=Math.min(Math.max(1,Math.floor(Number(u.searchParams.get('page'))||1)),Math.max(1,Math.ceil(matches.length/size)));
   return send(res,200,{total:matches.length,page,size,assign:canAssignRoutes(req),offers:matches.slice((page-1)*size,page*size)});
@@ -1164,7 +1178,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const createdAt=new Date().toISOString(),decisionNote=str(a.note,500);
   if(a.status==='rejected'&&!decisionNote)return send(res,400,{error:'Podaj powód odrzucenia.'});
   if(a.status==='approved'){
-   const {companyId,kind,financing,model,description,downPayment}=request;
+   const {companyId,kind,financing,model,description}=request;
+   const host=new URL(request.listing).hostname;
+   const autoline=/(^|\.)autoline\.[a-z.]+$/i.test(host);
+   let downPayment=request.downPayment;
+   if(financing==='cash'&&(autoline||a.listingPrice)){
+    const price=priceCents(a.listingPrice);
+    if(!price||!['PLN','EUR'].includes(a.listingCurrency))return send(res,400,{error:'Sprawdź ogłoszenie i wpisz cenę oraz walutę.'});
+    downPayment=Math.round(price*(a.listingCurrency==='EUR'?EURO_PLN:1));
+   }
    const plate=financing==='lease'?str(a.plate,30).toUpperCase():request.plate;
    if(!plate)return send(res,400,{error:'Wpisz rejestrację z miasta banku lub leasingodawcy.'});
    if([...(db.fleet||[]),...(db.trailers||[])].some(x=>x.plate===plate))return send(res,409,{error:'Ta rejestracja jest już we flocie.'});
@@ -1184,7 +1206,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    }
    if(downPayment>0)(db.ledger??=[]).push({id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,
     type:financing==='lease'?'wpłata leasingowa':'zakup_pojazdu',description:[model,plate,description].filter(Boolean).join(' · '),amount:-downPayment/100,createdAt});
-   Object.assign(request,{plate,vehicleId:vehicle.id});
+   Object.assign(request,{plate,vehicleId:vehicle.id,downPayment});
+   if(financing==='cash')request.amount=downPayment;
   }
   Object.assign(request,{status:a.status,decisionNote,decidedBy:who(req).username,decidedAt:createdAt});
   await save(db);
