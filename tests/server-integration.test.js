@@ -121,6 +121,14 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/economy/order/decide',{id:lamp.data.id,status:'Zatwierdzone'},sub.cookie)).status,403);
  assert.equal((await req('/api/economy/order/decide',{id:lamp.data.id,status:'Zatwierdzone'},dispatcher.cookie)).status,200);
  assert.equal((await req('/api/economy/lights',null,login.cookie)).data[0].status,'Zatwierdzone');
+ const invoiceUrl='/api/company/accessory-invoice?id=';
+ assert.equal((await req(invoiceUrl+lamp.data.id,null,login.cookie)).data.total,37.02);
+ assert.equal((await req(invoiceUrl+lamp.data.id,null,sub.cookie)).status,404);
+ const accessory=await req('/api/economy/lights',{name:'Obrysy',unitPrice:300,quantity:2},subDriver.cookie);
+ assert.equal(accessory.status,201);
+ assert.equal((await req(invoiceUrl+accessory.data.id,null,subDriver.cookie)).status,404);
+ assert.equal((await req('/api/economy/order/decide',{id:accessory.data.id,status:'Odrzucone'},sub.cookie)).status,200);
+ assert.equal((await req(invoiceUrl+accessory.data.id,null,subDriver.cookie)).status,404);
  const fleet=await req('/api/fleet',null,admin.cookie);
  const boss=fleet.data.drivers.find(account=>account.username==='dispatcher1');
  assert.equal(boss.role,'boss');

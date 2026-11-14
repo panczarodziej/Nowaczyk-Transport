@@ -189,7 +189,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !['/api/company/management','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !['/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/fleet'&&u.searchParams.get('company')==='1')&&
     !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
@@ -440,13 +440,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDrive(req))return send(res,403,{error:'Tylko kierowca'});
   const driver=me.username.toLowerCase();
   db.shopOrders??=[];
-  if(method==='GET')return send(res,200,db.shopOrders.filter(order=>order.category==='lights'&&order.driver===driver));
+  if(method==='GET')return send(res,200,db.shopOrders.filter(order=>order.category==='lights'&&(order.driverId?order.driverId===me.id:order.driver===driver)));
   const a=await body(req),name=str(a.name,100),unitPrice=a.unitPrice,quantity=a.quantity;
   const cents=Math.round(unitPrice*100);
   if(!name||!Number.isFinite(unitPrice)||cents<1||!Number.isSafeInteger(quantity)||quantity<1||quantity>1000||cents*quantity>100000000){
    return send(res,400,{error:'Podaj nazwę, poprawną cenę za sztukę i ilość.'});
   }
-  const order={id:crypto.randomUUID(),driver,category:'lights',name,unitPrice:cents/100,quantity,price:cents*quantity/100,status:'Oczekuje',createdAt:new Date().toISOString()};
+  const order={id:crypto.randomUUID(),driver,category:'lights',companyId:me.companyId,driverId:me.id,name,unitPrice:cents/100,quantity,price:cents*quantity/100,status:'Oczekuje',createdAt:new Date().toISOString()};
   db.shopOrders.push(order);
   await save(db);
   return send(res,201,order);
@@ -457,14 +457,46 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!item)return send(res,404,{error:'Nie znaleziono produktu'});
   db.shopOrders??=[];const order={id:crypto.randomUUID(),driver:me.username.toLowerCase(),itemId:item.id,name:item.name,price:item.price,status:'Oczekuje',createdAt:new Date().toISOString()};db.shopOrders.push(order);await save(db);return send(res,201,order);
  }
+ if(u.pathname==='/api/company/accessory-invoice'&&method==='GET'){
+  const me=who(req);
+  if(!me)return send(res,401,{error:'Zaloguj się.'});
+  const invoice=(db.shopOrders||[]).find(x=>x.id===u.searchParams.get('id'))?.invoice
+   ||(db.ledger||[]).find(x=>x.id===u.searchParams.get('id'))?.invoice;
+  if(!invoice||!(auth(req)||(companyManager(req)&&invoice.companyId===me.companyId)||
+     (invoice.driverId?invoice.driverId===me.id:invoice.driver===me.username.toLowerCase()))){
+   return send(res,404,{error:'Nie znaleziono dokumentu.'});
+  }
+  return send(res,200,invoice);
+ }
  if(u.pathname==='/api/economy/order/decide'&&method==='POST'){
-  if(!auth(req))return send(res,403,{error:'Tylko administrator'});
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
   const a=await body(req),order=(db.shopOrders||[]).find(x=>x.id===a.id);
   if(!order)return send(res,404,{error:'Nie znaleziono zamówienia'});
+  const accessory=order.category==='lights',me=who(req);
+  const companyId=order.companyId||accounts.get(order.driver)?.companyId||MAIN_COMPANY_ID;
+  if(!auth(req)&&(!accessory||companyId!==me.companyId))return send(res,403,{error:'Brak dostępu do tego wniosku.'});
   if(order.status!=='Oczekuje')return send(res,409,{error:'Zamówienie już rozpatrzone'});
   if(!['Zatwierdzone','Odrzucone'].includes(a.status))return send(res,400,{error:'Nieprawidłowa decyzja'});
-  if(a.status==='Zatwierdzone'&&order.category!=='lights'){db.wallets??={};const balance=db.wallets[order.driver]||0;if(balance<order.price)return send(res,409,{error:'Za mało środków kierowcy'});db.wallets[order.driver]=Math.round((balance-order.price)*100)/100;}
-  order.status=a.status;order.decidedAt=new Date().toISOString();await save(db);return send(res,200,order);
+  const createdAt=new Date().toISOString();
+  if(a.status==='Zatwierdzone'){
+   if(accessory){
+    const company=db.companies.find(c=>c.id===companyId);
+    if(!company)return send(res,404,{error:'Nie znaleziono firmy.'});
+    order.invoice={number:'DOD-'+order.id.toUpperCase(),companyId,company:company.name,driver:order.driver,driverId:order.driverId,
+     name:order.name,quantity:order.quantity,unitPrice:order.unitPrice,total:order.price,createdAt,approvedBy:me.username};
+    (db.ledger??=[]).push({id:crypto.randomUUID(),companyId,orderId:order.id,type:'dodatki do pojazdu',
+     description:order.name,amount:-order.price,createdAt,invoiceNumber:order.invoice.number});
+   }else{
+    db.wallets??={};
+    const balance=db.wallets[order.driver]||0;
+    if(balance<order.price)return send(res,409,{error:'Za mało środków kierowcy'});
+    db.wallets[order.driver]=roundPLN(balance-order.price);
+   }
+  }
+  order.status=a.status;
+  order.decidedAt=createdAt;
+  await save(db);
+  return send(res,200,order);
  }
  if(u.pathname==='/api/economy/fine'&&method==='POST'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
@@ -826,6 +858,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    fleet:(db.fleet||[]).filter(x=>(x.companyId||MAIN_COMPANY_ID)===companyId),
    trailers:(db.trailers||[]).filter(x=>(x.ownerCompanyId||MAIN_COMPANY_ID)===companyId),
    drivers:(db.accounts||[]).filter(x=>x.companyId===companyId&&employee(x)).map(safeAccount),
+   accessoryRequests:(db.shopOrders||[]).filter(o=>o.category==='lights'&&(o.companyId||accounts.get(o.driver)?.companyId||MAIN_COMPANY_ID)===companyId),
    requests:(db.vehicleRequests||[]).filter(x=>x.companyId===companyId),
   });
  }
@@ -850,6 +883,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!cents||!description)return send(res,400,{error:'Podaj opis i kwotę wydatku.'});
   const expense={id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,type:'wyposażenie floty',description,
    invoiceNumber,plate:vehicle.plate,amount:-cents/100,createdBy:who(req).username,createdAt:new Date().toISOString()};
+  expense.invoice={number:invoiceNumber||'DOD-'+expense.id.toUpperCase(),companyId,company:db.companies.find(c=>c.id===companyId)?.name,
+   name:description,quantity:1,unitPrice:cents/100,total:cents/100,plate:vehicle.plate,createdAt:expense.createdAt,approvedBy:who(req).username};
   (db.ledger??=[]).push(expense);
   await save(db);
   return send(res,201,expense);
@@ -902,7 +937,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    return send(res,400,{error:'Uzupełnij dane pojazdu, cenę, link HTTPS i dane finansowania.'});
   }
   const request={id:crypto.randomUUID(),companyId,kind,financing,brand,model,chassis,color,emission,mileage,amount,listing,plate,
-   bankCity,downPayment,trailerType,description:str(a.description,500),status:'pending',submittedBy:who(req).username,createdAt:new Date().toISOString()};
+   bankCity,downPayment,trailerType,seller:str(a.seller,120),year:str(a.year,4),vin:str(a.vin,25).toUpperCase(),
+   lessor:financing==='lease'?str(a.lessor,120):'',description:str(a.description,500),status:'pending',submittedBy:who(req).username,createdAt:new Date().toISOString()};
   (db.vehicleRequests??=[]).push(request);
   await save(db);
   return send(res,201,request);

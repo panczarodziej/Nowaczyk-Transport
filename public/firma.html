@@ -68,6 +68,10 @@ button+button{margin-left:8px}
  <label>Własna rejestracja <input name="plate" maxlength="30" required></label>
  <label>Miasto banku lub leasingodawcy <input name="bankCity" maxlength="100" placeholder="Gdańsk" required></label>
  <label>Wpłata początkowa (PLN) <input name="downPayment" type="number" min="0" max="999999999.99" step="0.01" value="0" required></label>
+ <label>Sprzedawca <input name="seller" maxlength="120"></label>
+ <label>Rok produkcji <input name="year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"></label>
+ <label>VIN / numer podwozia <input name="vin" maxlength="25"></label>
+ <label>Nazwa leasingodawcy <input name="lessor" maxlength="120"></label>
  <label>Opis <input name="description" maxlength="500"></label>
  <button>Wyślij do administracji</button>
 </form>
@@ -148,7 +152,9 @@ function renderManagement(card,company,data,user){
  card.append(element('h3','Historia wydatków'));
  const expenses=element('ul');
  for(const expense of data.expenses){
-  expenses.append(element('li',[expense.createdAt?.slice(0,10),expense.type,expense.description||expense.place,expense.plate,expense.invoiceNumber,money(Math.abs(expense.amount)*100)].filter(Boolean).join(' · ')));
+  const row=element('li',[expense.createdAt?.slice(0,10),expense.type,expense.description||expense.place,expense.plate,expense.invoiceNumber,money(Math.abs(expense.amount)*100)].filter(Boolean).join(' · '));
+  if(expense.invoice){const link=element('a',' · Dokument');link.href='/rozliczenie-dodatkow.html?id='+encodeURIComponent(expense.id);row.append(link)}
+  expenses.append(row);
  }
  card.append(data.expenses.length?expenses:element('p','Brak wydatków.'));
  if(partners){
@@ -176,6 +182,22 @@ function renderManagement(card,company,data,user){
   };
   row.append(button);card.append(row);
  }
+ card.append(element('h3','Wnioski o dodatki'));
+ for(const order of [...data.accessoryRequests].reverse()){
+  const row=element('p',order.driver+' · '+order.name+' · '+order.quantity+' × '+money(order.unitPrice*100)+' · '+order.status+' ');
+  if(order.invoice){
+   const link=element('a','Otwórz dokument');link.href='/rozliczenie-dodatkow.html?id='+encodeURIComponent(order.id);row.append(link);
+  }
+  if(order.status==='Oczekuje'){
+   for(const [status,label] of [['Zatwierdzone','Zaakceptuj'],['Odrzucone','Odrzuć']]){
+    const button=element('button',label);
+    button.onclick=()=>action(button,()=>api('/api/economy/order/decide','POST',{id:order.id,status}));
+    row.append(button);
+   }
+  }
+  card.append(row);
+ }
+ if(!data.accessoryRequests.length)card.append(element('p','Brak wniosków o dodatki.'));
  card.append(element('h3','Wnioski flotowe'));
  if(!data.requests.length)card.append(element('p','Brak wniosków.'));
  for(const request of [...data.requests].reverse()){
@@ -185,7 +207,7 @@ function renderManagement(card,company,data,user){
   item.append(element('p',[
    request.kind==='truck'?'Ciągnik':'Naczepa',request.trailerType,request.chassis,request.color,request.emission,
    request.mileage.toLocaleString('pl-PL')+' km',money(request.amount),
-   request.financing==='cash'?'Gotówka':'Leasing · '+request.bankCity+' · wpłata '+money(request.downPayment),request.plate,request.description,
+   request.financing==='cash'?'Gotówka':'Leasing · '+request.bankCity+' · wpłata '+money(request.downPayment),request.plate,request.seller,request.year,request.vin,request.lessor,request.description,
   ].filter(Boolean).join(' · ')));
   const listing=element('a','Otwórz ogłoszenie');listing.href=request.listing;listing.target='_blank';listing.rel='noopener noreferrer';item.append(listing);
   if(request.decisionNote)item.append(element('p',request.decisionNote));
@@ -269,7 +291,7 @@ else{
  const requestForm=get('vehicleRequest');
  function syncRequestFields(){
   const fields=requestForm.elements,truck=fields.kind.value==='truck',cash=fields.financing.value==='cash';
-  for(const [name,visible] of Object.entries({emission:truck,trailerType:!truck,plate:cash,bankCity:!cash,downPayment:!cash})){
+  for(const [name,visible] of Object.entries({emission:truck,trailerType:!truck,plate:cash,bankCity:!cash,downPayment:!cash,lessor:!cash})){
    fields[name].disabled=!visible;fields[name].parentElement.hidden=!visible;
   }
  }

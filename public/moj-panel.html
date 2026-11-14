@@ -91,7 +91,11 @@ let me=null,routes=[],expenses=[],currentTab='home';const $=id=>document.getElem
 async function loadLights(){
  try{
   const rows=await api('/api/economy/lights');
-  $('lightsRequests').replaceChildren(...(rows.length?rows.reverse().map(row=>node('li',row.name+' · '+row.quantity+' × '+money(row.unitPrice)+' = '+money(row.price)+' · '+row.status)):[node('li','Brak wniosków.')]));
+  $('lightsRequests').replaceChildren(...(rows.length?rows.reverse().map(row=>{
+   const item=node('li',row.name+' · '+row.quantity+' × '+money(row.unitPrice)+' = '+money(row.price)+' · '+row.status);
+   if(row.invoice){const link=node('a',' · Otwórz dokument');link.href='/rozliczenie-dodatkow.html?id='+encodeURIComponent(row.id);item.append(link)}
+   return item;
+  }):[node('li','Brak wniosków.')]));
  }catch(error){$('lightsStatus').textContent=error.message}
 }
 $('lightsForm').onsubmit=async event=>{

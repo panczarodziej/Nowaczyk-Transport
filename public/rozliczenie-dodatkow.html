@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dokument zakupu dodatków — Nowaczyk Transport</title>
+<link rel="stylesheet" href="/transport-ui.css">
+<style>
+main{max-width:780px;margin:32px auto;padding:28px}.info{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:24px 0}th,td{padding:10px;text-align:left}tfoot{font-weight:700}button{padding:9px 12px}
+@media print{html,body{background:white}main.panel{margin:0;border:0}button,a{display:none}}
+</style></head><body><main class="panel">
+<a href="/moj-panel.html#lights">← Panel kierowcy</a>
+<h1>Dokument zakupu dodatków</h1>
+<p>Rozliczenie wewnętrzne · symulacja ETS2</p>
+<p id="status" role="status"></p>
+<div id="invoice" hidden>
+<div class="info"><p><strong>Nabywca</strong><br><span id="buyer"></span><br><span id="recipient"></span></p>
+<p><strong id="number"></strong><br><span id="date"></span><br><span id="approved"></span></p></div>
+<table><thead><tr><th>Przedmiot</th><th>Ilość</th><th>Cena za szt.</th><th>Wartość</th></tr></thead>
+<tbody><tr><td id="item"></td><td id="quantity"></td><td id="price"></td><td id="value"></td></tr></tbody>
+<tfoot><tr><td colspan="3">Razem</td><td id="total"></td></tr></tfoot></table>
+<button id="print">Drukuj / zapisz PDF</button>
+</div></main><script>
+const get=id=>document.getElementById(id);
+const id=new URLSearchParams(location.search).get('id')||'';
+const pln=new Intl.NumberFormat('pl-PL',{style:'currency',currency:'PLN'});
+(async()=>{
+ const response=await fetch('/api/company/accessory-invoice?id='+encodeURIComponent(id));
+ const data=await response.json();
+ if(!response.ok)throw Error(data.error);
+ const fields={buyer:data.company,recipient:[data.driver,data.plate].filter(Boolean).join(' · '),
+  number:data.number,date:new Date(data.createdAt).toLocaleDateString('pl-PL',{timeZone:'Europe/Warsaw'}),
+  approved:'Zatwierdził: '+data.approvedBy,item:data.name,quantity:data.quantity,price:pln.format(data.unitPrice),
+  value:pln.format(data.total),total:pln.format(data.total)};
+ for(const [key,value] of Object.entries(fields))get(key).textContent=value;
+ get('invoice').hidden=false;
+})().catch(error=>{get('status').textContent=error.message});
+get('print').onclick=()=>window.print();
+</script></body></html>
