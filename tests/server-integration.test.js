@@ -156,6 +156,12 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  await req('/api/accounts/update',{username:trainee.driver,dispatchAccess:false},admin.cookie);
  assert.equal((await req('/api/routes',trainee,subDriver.cookie)).status,403);
  const assigned=await req('/api/routes',route,dispatcher.cookie);assert.equal(assigned.status,201);
+ const notificationId='route:'+assigned.data.id+':assigned';
+ const notifications='/api/notifications';
+ assert.ok((await req(notifications,null,login.cookie)).data.items.some(item=>item.id===notificationId&&!item.read));
+ assert.equal((await req(notifications,{id:notificationId},sub.cookie)).status,404);
+ assert.equal((await req(notifications,{id:notificationId},login.cookie)).status,200);
+ assert.equal((await req(notifications,null,login.cookie)).data.items.find(item=>item.id===notificationId).read,true);
  // Website sessions cannot accept, even when a client name header is supplied.
  assert.equal((await req('/api/routes/accept',{routeId:assigned.data.id},login.cookie,{'X-Nowaczyk-Client':'desktop'})).status,403);
  assert.equal((await req('/api/desktop/login',{username:'driver1',password:'driver-password-only'},null,{'X-Nowaczyk-Client':'desktop',Origin:base})).status,403);
