@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wnioski — Nowaczyk System</title>
+<link rel="stylesheet" href="/transport-ui.css">
+<script src="/transport-header.js" defer></script>
+<script src="/transport-nav.js" defer></script>
+<style>
+main{max-width:1000px;margin:auto;padding:24px}article{padding:18px;margin:14px 0;scroll-margin-top:20px}
+article:target{outline:2px solid #146587}form{display:flex;align-items:end;gap:10px;flex-wrap:wrap}label{display:grid;gap:4px}
+input,button{padding:8px}article p{white-space:pre-wrap;overflow-wrap:anywhere}
+</style></head><body><main>
+<h1>Wnioski do rozpatrzenia</h1><p id="status" role="status">Wczytywanie wniosków…</p><div id="requests"></div>
+</main><script>
+const statusLine=document.getElementById('status');
+const root=document.getElementById('requests');
+function el(tag,text){const e=document.createElement(tag);e.textContent=text;return e}
+async function api(path,method='GET',body){
+ const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const data=await r.json();
+ if(!r.ok)throw Error(data.error||'Nie udało się zapisać decyzji.');
+ return data;
+}
+function field(form,text,name,maxLength){
+ const label=el('label',text),input=document.createElement('input');
+ input.name=name;input.maxLength=maxLength;label.append(input);form.append(label);
+}
+const decisions={
+ job:['/api/admin/applications','PATCH','Przyjęte','Odrzucone'],
+ vehicle:['/api/company/vehicle-requests/decide','POST','approved','rejected'],
+ accessory:['/api/economy/order/decide','POST','Zatwierdzone','Odrzucone'],
+ license:['/api/company/trailer-license','POST','approved','rejected']
+};
+function render(item){
+ const r=item.review,card=el('article','');card.id=item.id;card.className='panel';
+ card.append(el('h2',item.label));
+ if(r.details.length)card.append(el('p',r.details.join(' · ')));
+ if(r.listing&&r.listing.startsWith('https://')){
+  const link=el('a','Otwórz ogłoszenie');link.href=r.listing;link.target='_blank';link.rel='noopener noreferrer';card.append(link);
+ }
+ const form=document.createElement('form');
+ if(r.lease)field(form,'Rejestracja leasingowa','plate',30);
+ if(r.kind==='vehicle')field(form,'Uzasadnienie decyzji','note',500);
+ for(const [value,label] of [['approve','Zatwierdź'],['reject','Odrzuć']]){
+  if(r.acceptOnly&&value==='reject')continue;
+  const btn=el('button',label);btn.type='submit';btn.value=value;form.append(btn);
+ }
+ const feedback=el('p','');feedback.setAttribute('role','status');
+ form.onsubmit=async event=>{
+  event.preventDefault();
+  const [url,method,approve,reject]=decisions[r.kind];
+  const decision=event.submitter?.value==='reject'?reject:approve;
+  const values=Object.fromEntries(new FormData(form));
+  for(const btn of form.querySelectorAll('button'))btn.disabled=true;
+  try{
+   await api(url,method,r.kind==='license'?{companyId:r.id,decision}:{...values,id:r.id,status:decision});
+   card.remove();
+   statusLine.textContent=root.children.length?'Decyzja zapisana.':'Decyzja zapisana. Brak kolejnych wniosków.';
+   window.dispatchEvent(new Event('requests-changed'));
+  }catch(error){feedback.textContent=error.message}
+  finally{for(const btn of form.querySelectorAll('button'))btn.disabled=false}
+ };
+ card.append(form,feedback);return card;
+}
+(async()=>{
+ const {items}=await api('/api/notifications');
+ const rows=items.filter(item=>item.review);
+ root.replaceChildren(...rows.map(render));
+ const target=decodeURIComponent(location.hash.slice(1));
+ if(target)document.getElementById(target)?.scrollIntoView();
+ statusLine.textContent=rows.length?'':(target?'Ten wniosek został już rozpatrzony lub jest niedostępny.':'Brak wniosków do rozpatrzenia.');
+})().catch(error=>{statusLine.textContent=error.message});
+</script></body></html>
