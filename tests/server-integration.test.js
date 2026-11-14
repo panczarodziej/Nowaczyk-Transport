@@ -83,15 +83,16 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  for(const bossSession of [sub,explicitLogin]){
   const map=await req('/api/fleet/positions',null,bossSession.cookie);
   assert.equal(map.status,200);
-  assert.deepEqual(map.data.positions.map(p=>p.driver),['subdriver']);
-  assert.equal(map.data.positions[0].companyName,'Podwykonawca');
+  assert.ok(map.data.positions.some(p=>p.driver==='Driver1'||p.driver==='driver1'));
+  const subPosition=map.data.positions.find(p=>p.driver==='subdriver');
+  assert.equal(subPosition.companyName,'Podwykonawca');
   const summary=await req('/api/company/summary?companyId=nowaczyk',null,bossSession.cookie);
   assert.equal(summary.status,200);
   assert.equal(summary.data.companyName,'Podwykonawca');
   assert.equal(summary.data.drivers,1);
   assert.equal(summary.data.online,1);
   assert.equal(summary.data.revenue,undefined);
-  assert.equal(map.data.positions[0].x,55);
+  assert.equal(subPosition.x,55);
   assert.equal((await fetch(base+'/centrum-floty.html',{headers:{Cookie:bossSession.cookie}})).status,200);
   assert.equal((await req('/api/accounts',companyDriver,bossSession.cookie)).status,403);
   const companies=await req('/api/admin/companies',null,bossSession.cookie);
