@@ -304,14 +304,15 @@ if(partners){get('title').textContent='Podwykonawcy';get('stats').hidden=true;ge
 else{
  refresh();
  const financeForm=get('startupFinance');
- let repay=false;
+ let repay=false,mainLoan=false;
  financeForm.onsubmit=async event=>{
   event.preventDefault();
   const button=event.submitter,values=Object.fromEntries(new FormData(financeForm));
   if(!confirm(repay?'Spłacić kredyt z konta firmy?':'Uruchomić finansowanie startowe?'))return;
   button.disabled=true;
   try{
-   await api('/api/company/startup-finance','POST',{...values,source:repay?'repay':values.source});
+   if(mainLoan)await api('/api/company/loan','POST',{amount:values.amount,action:repay?'repay':'borrow'});
+   else await api('/api/company/startup-finance','POST',{...values,source:repay?'repay':values.source});
    financeForm.reset();
    await refreshMoney();
    get('moneyStatus').textContent='Zapisano.';
@@ -327,11 +328,12 @@ else{
     get(key).textContent=budget[key]===null?'Brak budżetu startowego':money(budget[key]);
    }
    repay=budget.loanRemainingCents>0;
-   financeForm.hidden=budget.companyId==='nowaczyk'||(budget.locked&&!repay);
-   financeForm.elements.source.closest('label').hidden=repay;
-   get('startupTitle').textContent=repay?'Spłata kredytu firmowego':'Finansowanie startowe';
+   mainLoan=budget.companyId==='nowaczyk';
+   financeForm.hidden=!mainLoan&&budget.locked&&!repay;
+   financeForm.elements.source.closest('label').hidden=repay||mainLoan;
+   get('startupTitle').textContent=repay?'Spłata kredytu firmowego':mainLoan?'Kredyt firmowy':'Finansowanie startowe';
    get('startupDetails').textContent=repay?'Do spłaty: '+money(budget.loanRemainingCents):'Kredyt bez odsetek, do 500 000 zł. Spłacasz go z salda firmy.';
-   financeForm.querySelector('button').textContent=repay?'Spłać kredyt':'Zatwierdź finansowanie';
+   financeForm.querySelector('button').textContent=repay?'Spłać kredyt':mainLoan?'Weź kredyt':'Zatwierdź finansowanie';
   }catch(error){if(get('companyMoney').hidden)return;get('moneyStatus').textContent=error.message}
 
  }
