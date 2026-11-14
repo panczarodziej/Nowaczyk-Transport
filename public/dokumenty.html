@@ -48,6 +48,16 @@ summary{cursor:pointer} [hidden]{display:none!important}
 </form></details>
 <p id="emptyCmr"></p>
 </section>
+<section id="registrations" hidden>
+<h2>Przerejestrowanie ciągnika</h2>
+<p>Wybierz ciągnik z zatwierdzonego zakupu. Na zmianę rejestracji masz 7 dni od zatwierdzenia.</p>
+<form id="registration">
+<label>Ciągnik <select name="vehicleId" required></select></label>
+<label>Nowa rejestracja <input name="plate" maxlength="15" required></label>
+<button>Zapisz nową rejestrację</button>
+</form>
+<ul id="registrationHistory"></ul>
+</section>
 <section id="inspections" hidden>
 <h2>Przeglądy ciągników i naczep</h2>
 <ul id="deadlines"></ul>
@@ -120,6 +130,18 @@ function renderCmr(doc){
 }
 async function refresh(){
  const data=await request();
+ const registrations=data.registrations||[];
+ const pending=registrations.filter(vehicle=>!vehicle.registeredAt);
+ get('registrations').hidden=!registrations.length;
+ get('registration').hidden=!pending.length;
+ options(get('registration').elements.vehicleId,pending,vehicle=>vehicle.model+' · '+vehicle.plate);
+ get('registrationHistory').replaceChildren(...registrations.map(vehicle=>{
+  const due=new Date(vehicle.registrationDueAt);
+  const date=due.toLocaleDateString('pl-PL',{timeZone:'Europe/Warsaw'});
+  const status=vehicle.registeredAt?'Przerejestrowano z '+vehicle.previousPlate:
+   (due.getTime()<Date.now()?'Po terminie · ':'Termin · ')+date;
+  return make('li',vehicle.model+' · '+vehicle.plate+' · '+status);
+ }));
  get('company').textContent=data.company;
  const done=new Set(data.cmrs.map(doc=>doc.routeId));
  const routes=data.routes.filter(route=>!done.has(route.id));
@@ -162,7 +184,7 @@ async function refresh(){
   h.mileage!=null?h.mileage+' km':'',h.reference,h.notes
  ].filter(Boolean).join(' · '))));
 }
-for(const id of ['cmr','inspection','permit']){
+for(const id of ['cmr','inspection','permit','registration']){
  const form=get(id);
  form.onsubmit=async event=>{
   event.preventDefault();
@@ -173,7 +195,7 @@ for(const id of ['cmr','inspection','permit']){
    form.reset();
    updateIssuer();
    await refresh();
-   get('status').textContent={cmr:'CMR zapisany.',inspection:'Przegląd zapisany.',permit:'Dokument zapisany.'}[id];
+   get('status').textContent={cmr:'CMR zapisany.',inspection:'Przegląd zapisany.',permit:'Dokument zapisany.',registration:'Nowa rejestracja zapisana.'}[id];
   }catch(error){get('status').textContent=error.message}
   finally{button.disabled=false}
  };
