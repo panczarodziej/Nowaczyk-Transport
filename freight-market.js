@@ -64,7 +64,7 @@ function buildOffers(map,cities,quote){
   offers.push({id:'NT-'+String(offers.length+1).padStart(5,'0'),mapSetFrom:from.cityId,mapSetTo:to.cityId,
    from:from.city,to:to.city,fromCountry:countryLabel(from.country),toCountry:countryLabel(to.country),fromCode:regionCodes[from.country],toCode:regionCodes[to.country],sourceCompany:from.company,destinationCompany:to.company,
    cargo:from.cargo,cargoLabel:cargoLabels.get(from.cargo),cargoTons,trailerType,plannedKm,
-   freight:quote(plannedKm,from.cargo,cargoTons,trailerType)});
+   freight:quote(plannedKm,trailerType,countryLabel(from.country),countryLabel(to.country))});
  }
  return offers;
 }
