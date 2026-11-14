@@ -268,6 +268,30 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji i mapy własnej firmy.'});
  }
 
+ if(u.pathname.startsWith('/api/fleet-finance/')){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
+  const me=who(req),companyId=auth(req)&&u.searchParams.get('companyId')||me.companyId;
+  if(companyId!==me.companyId&&!auth(req))return send(res,403,{error:'Brak dostępu'});
+  if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Brak firmy'});
+  if(method==='GET'&&u.pathname==='/api/fleet-finance/overview')return send(res,200,{
+   leases:(db.fleetLeases||[]).filter(x=>x.companyId===companyId),
+   policies:(db.fleetPolicies||[]).filter(x=>x.companyId===companyId),
+   tolls:(db.fleetTolls||[]).filter(x=>x.companyId===companyId),
+   notices:fleetFinance.notices(db,companyId)
+  });
+  if(method==='POST'){
+   const a=await body(req);
+   try{
+    let result;
+    if(u.pathname==='/api/fleet-finance/lease')result=fleetFinance.createLease(db,companyId,a);
+    else if(u.pathname==='/api/fleet-finance/policy')result=fleetFinance.createPolicy(db,companyId,a);
+    else if(u.pathname==='/api/fleet-finance/toll')result=fleetFinance.createToll(db,companyId,a);
+    else return send(res,404,{error:'Nie znaleziono'});
+    await save(db);return send(res,201,result);
+   }catch(error){return send(res,400,{error:error.message})}
+  }
+  return send(res,405,{error:'Metoda niedozwolona'});
+ }
  if(u.pathname==='/api/my-applications'&&method==='GET'){
   const me=who(req);
   if(!me)return send(res,401,{error:'Zaloguj się.'});
@@ -308,6 +332,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(license.status==='pending'&&auth(req))add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+companyName(id),license.createdAt,'/podwykonawcy.html',{kind:'license',id,details:[license.reason].filter(Boolean)});
    if(license.status!=='pending'&&manager&&id===me.companyId)add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+(license.status==='approved'?'zatwierdzono':'odrzucono'),license.decidedAt,'/firma.html#trailerLicense');
   }
+  if(manager)for(const n of fleetFinance.notices(db,me.companyId))rows.push({id:'finance:'+n.id,label:n.label+' · '+n.due,at:n.at,url:n.url});
   const reads=db.notificationReads?.[me.id]||[];
   if(method==='POST'){
    const a=await body(req);
