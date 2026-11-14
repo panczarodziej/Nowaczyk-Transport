@@ -243,7 +243,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !['/api/company/startup-finance','/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !['/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
     !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
@@ -253,6 +253,50 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji i mapy własnej firmy.'});
  }
 
+ if(u.pathname==='/api/my-applications'&&method==='GET'){
+  const me=who(req);
+  if(!me)return send(res,401,{error:'Zaloguj się.'});
+  return send(res,200,(db.applications||[]).filter(a=>a.applicantId===me.id).map(({id,companyName,date,status})=>({id,companyName,date,status})));
+ }
+ if(u.pathname==='/api/notifications'&&['GET','POST'].includes(method)){
+  const me=who(req);
+  if(!me)return send(res,401,{error:'Zaloguj się.'});
+  const name=me.username.toLowerCase(), manager=companyManager(req);
+  const scope=id=>auth(req)||id===me.companyId;
+  const rows=[];
+  const add=(kind,id,status,label,at,url)=>rows.push({id:kind+':'+id+':'+status,label,at,url});
+  const companyName=id=>db.companies.find(c=>c.id===id)?.name||'Firma';
+  for(const a of db.applications||[]){
+   if(a.applicantId===me.id&&a.status!=='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.companyName+' · '+a.status,a.acceptedAt||a.date,'/rekrutacja.html#myApplications');
+   if(manager&&scope(a.companyId)&&a.status==='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.fullname+' · '+companyName(a.companyId),a.date,'/admin.html');
+  }
+  for(const r of db.vehicleRequests||[]){
+   const label=(r.kind==='trailer'?'Naczepa':'Ciągnik')+' · '+r.model;
+   if(r.status==='pending'&&manager&&scope(r.companyId))add('vehicle',r.id,r.status,'Nowy wniosek · '+companyName(r.companyId)+' · '+label,r.createdAt,r.companyId===me.companyId?'/firma.html#vehicleRequests':'/podwykonawcy.html');
+   if(r.status!=='pending'&&manager&&r.companyId===me.companyId)add('vehicle',r.id,r.status,label+' · '+(r.status==='approved'?'zatwierdzono':'odrzucono'),r.decidedAt,'/firma.html#vehicleRequests');
+  }
+  for(const o of db.shopOrders||[]){
+   if(o.category!=='lights')continue;
+   const companyId=o.companyId||accounts.get(o.driver)?.companyId||MAIN_COMPANY_ID;
+   if(manager&&scope(companyId)&&o.status==='Oczekuje')add('accessory',o.id,o.status,'Wniosek o dodatki · '+o.name,o.createdAt,companyId===me.companyId?'/firma.html':'/podwykonawcy.html');
+   if(o.status!=='Oczekuje'&&(o.driverId?o.driverId===me.id:o.driver===name))add('accessory',o.id,o.status,o.name+' · '+o.status,o.decidedAt,'/moj-panel.html#lights');
+  }
+  for(const [id,license] of Object.entries(db.trailerLicenses||{})){
+   if(license.status==='pending'&&auth(req))add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+companyName(id),license.createdAt,'/podwykonawcy.html');
+   if(license.status!=='pending'&&manager&&id===me.companyId)add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+(license.status==='approved'?'zatwierdzono':'odrzucono'),license.decidedAt,'/firma.html#trailerLicense');
+  }
+  const reads=db.notificationReads?.[me.id]||[];
+  if(method==='POST'){
+   const a=await body(req);
+   if(!rows.some(row=>row.id===a.id))return send(res,404,{error:'Powiadomienie jest niedostępne.'});
+   (db.notificationReads??={})[me.id]=[...new Set([...reads,a.id])];
+   await save(db);
+   return send(res,200,{ok:true});
+  }
+  const seen=new Set(reads);
+  rows.sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+  return send(res,200,{unread:rows.filter(row=>!seen.has(row.id)).length,items:rows.map(row=>({...row,read:seen.has(row.id)}))});
+ }
  // Centrum floty: dane pozycji z uwierzytelnionego konta; NIE jest to jeszcze integracja z ETS2.
  if(u.pathname==='/api/client-release'&&method==='GET'){let url='https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download/Nowaczyk-Transport-Setup.exe';try{const candidate=new URL(process.env.TELEMETRY_DOWNLOAD_URL||'');if(candidate.protocol==='https:')url=candidate.href}catch{}return send(res,200,{version:'0.3.30',available:!!url,url})}
  if(u.pathname==='/api/tachograph'&&['GET','POST'].includes(method)){
@@ -851,7 +895,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
     if(url.protocol!=='https:'||url.username||url.password)throw Error();
    }catch{return send(res,400,{error:'Link do zdjęć musi być poprawnym adresem HTTPS.'})}
   }
-  const x={id:crypto.randomUUID(),companyId:c.id,companyName:c.name,fullname,discord,age,hours,photoUrl,experience:str(a.experience,1200),mapProfile:str(a.mapProfile,80),norm:str(a.norm),availability:str(a.availability,500),truck:str(a.truck,150),reason:str(a.reason,2000),date:new Date().toISOString(),status:'Nowe'};
+  const x={id:crypto.randomUUID(),applicantId:who(req)?.id,companyId:c.id,companyName:c.name,fullname,discord,age,hours,photoUrl,experience:str(a.experience,1200),mapProfile:str(a.mapProfile,80),norm:str(a.norm),availability:str(a.availability,500),truck:str(a.truck,150),reason:str(a.reason,2000),date:new Date().toISOString(),status:'Nowe'};
   db.applications.push(x);await save(db);return send(res,201,{ok:true,id:x.id});
  }
  // Flota online: przypisania według ID konta, niezależne od lokalnych danych DEMO.
