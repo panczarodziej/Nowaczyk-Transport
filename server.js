@@ -155,9 +155,9 @@ function hasDispatcherRole(account){
 function canDispatch(req){return auth(req)||hasDispatcherRole(who(req))}
 function canAssignRoutes(req){
  const me=who(req);
- return hasDispatcherRole(me)||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID);
+ return hasDispatcherRole(me)||me?.role==="boss"||isSubcontractorBoss(req);
 }
-function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
+function canDrive(req){return companyManager(req)||['driver','probation'].includes(who(req)?.role)}
 function companyManager(req){return auth(req)||isSubcontractorBoss(req)}
 function employee(account){return !account.deletedAt&&['driver','probation'].includes(account.role)}
 function drivingRoster(db){
@@ -234,8 +234,10 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !['/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
-    !(method==='GET'&&u.pathname==='/api/fleet'&&u.searchParams.get('company')==='1')&&
+    !['/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
+    !['/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
+    !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
     !['/api/accounts/me','/api/accounts/login','/api/accounts/password','/api/logout','/api/admin/applications','/api/companies','/api/me'].includes(u.pathname)){
@@ -383,6 +385,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/trailers'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const list=db.trailers||[];
+  if(isSubcontractorBoss(req))return send(res,200,{trailers:list.filter(t=>t.ownerCompanyId===me.companyId||
+   [...accounts.values()].some(a=>a.id===t.assigneeId&&a.active&&a.companyId===me.companyId))});
   if(canDispatch(req))return send(res,200,{trailers:list,assignees:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{trailers:list.filter(t=>t.assigneeId===me.id)});
  }
@@ -633,7 +637,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const r=(db.routes||[]).find(x=>x.id===u.searchParams.get('id'));
   if(!r)return send(res,404,{error:'Nie znaleziono zlecenia'});
-  if(!canDispatch(req)&&(r.driver.toLowerCase()!==me.username.toLowerCase()||r.companyId!==me.companyId))return send(res,403,{error:'Brak dostępu'});
+  if(!canDispatch(req)&&(r.companyId!==me.companyId||(!isSubcontractorBoss(req)&&r.driver.toLowerCase()!==me.username.toLowerCase())))return send(res,403,{error:'Brak dostępu'});
   const mapProfile=(db.driverMapProfiles||{})[r.driver.toLowerCase()]||'promods-pr';
   const cities={...europe,...middleEast,...(mapProfile==='promods-pr'?poland:{})};
   const companyAliases=require('./ets2-company-aliases.json');
@@ -651,14 +655,16 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Disposition':'attachment; filename="ks-job-'+r.id+'.json"','Cache-Control':'no-store'});return res.end(JSON.stringify(job,null,2));
  }
  if(u.pathname==='/api/routes/quote'&&method==='POST'){
-  if(!canDispatch(req))return send(res,403,{error:'Brak uprawnień'});
+  if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Brak uprawnień'});
   const a=await body(req),km=Number(a.plannedKm),tons=Number(a.cargoTons||0);
   if(!Number.isFinite(km)||km<0||km>20000||!Number.isFinite(tons)||tons<0||tons>100)return send(res,400,{error:'Nieprawidłowy dystans lub masa'});
-  const driver=str(a.driver,100).toLowerCase(),rate=(db.driverRates||{})[driver]??0.7;
+  const driver=str(a.driver,100).toLowerCase();
+  if(isSubcontractorBoss(req)&&driver&&accounts.get(driver)?.companyId!==who(req).companyId)return send(res,403,{error:'Wybierz kierowcę swojej firmy.'});
+  const rate=(db.driverRates||{})[driver]??0.7;
   return send(res,200,{freight:quoteFreight(km,a.cargo,tons,a.trailerType),driverPay:roundPLN(km*rate),driverRate:rate,estimated:true});
  }
  if(u.pathname==='/api/freight-market'&&method==='GET'){
-  if(!canDispatch(req))return send(res,403,{error:'Giełda jest dostępna dla szefa i dyspozytora.'});
+  if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Giełda jest dostępna dla szefa i dyspozytora.'});
   const filters=['from','to','cargo'].map(key=>normalize(u.searchParams.get(key)||''));
   const trailer=u.searchParams.get('trailer'),min=Number(u.searchParams.get('min')||0),max=Number(u.searchParams.get('max')||100);
   const assigned=new Set([...(db.routes||[]),...(db.archivedRoutes||[])].map(r=>r.offerId));
@@ -669,13 +675,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,200,{total:matches.length,page,size,assign:canAssignRoutes(req),offers:matches.slice((page-1)*size,page*size)});
  }
  if(u.pathname==='/api/routes/assignees'&&method==='GET'){
-  if(!canDispatch(req))return send(res,403,{error:'Brak dostępu do listy kierowców'});
-  return send(res,200,[...accounts.values()].filter(a=>a.active&&(['admin','driver','probation'].includes(a.role)||(a.role==='boss'&&a.companyId===MAIN_COMPANY_ID))).map(a=>a.username).sort());
+  if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Brak dostępu do listy kierowców'});
+  return send(res,200,[...accounts.values()].filter(a=>a.active&&(!isSubcontractorBoss(req)||a.companyId===who(req).companyId)&&(['admin','driver','probation'].includes(a.role)||(a.role==='boss'&&a.companyId===MAIN_COMPANY_ID)||a.id===who(req).id)).map(a=>a.username).sort());
  }
  if(u.pathname==='/api/routes/archive'&&method==='POST'){
   if(!canAssignRoutes(req))return send(res,403,{error:'Zleceniami zarządza główny szef lub dyspozytor.'});
   const {id}=await body(req),index=(db.routes||[]).findIndex(route=>route.id===id);
-  if(index<0)return send(res,404,{error:'Nie znaleziono trasy'});
+  if(index<0||(isSubcontractorBoss(req)&&db.routes[index].companyId!==who(req).companyId))return send(res,404,{error:'Nie znaleziono trasy'});
   const route=db.routes[index];
   if(route.status==='Zakończona'||(db.expenses||[]).some(expense=>expense.routeId===id))return send(res,409,{error:'Trasa zakończona lub ma zapisane koszty.'});
   db.archivedRoutes??=[];
@@ -686,7 +692,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/routes'&&method==='GET'){
   if(!who(req))return send(res,401,{error:'Zaloguj się'});
-  const me=who(req);return send(res,200,canDispatch(req)&&u.searchParams.get('mine')!=='1'?(db.routes||[]):(db.routes||[]).filter(r=>r.driver.toLowerCase()===me.username.toLowerCase()&&r.companyId===me.companyId));
+  const me=who(req),mine=u.searchParams.get('mine')==='1';
+  return send(res,200,(db.routes||[]).filter(r=>!mine&&canDispatch(req)||
+   r.companyId===me.companyId&&(!mine&&isSubcontractorBoss(req)||r.driver.toLowerCase()===me.username.toLowerCase())));
  }
  if(u.pathname==='/api/routes'&&method==='POST'){
   if(!who(req))return send(res,401,{error:'Sesja wygasła. Zaloguj się ponownie, aby zapisać trasę.'});
@@ -699,7 +707,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const from=str(a.from,120),to=str(a.to,120),driver=str(a.driver,100);
   if(!from||!to||!driver)return send(res,400,{error:'Podaj kierowcę, początek i koniec trasy'});
   const account=accounts.get(driver.toLowerCase());
-  if(!account?.active||!(['admin','driver','probation'].includes(account.role)||(account.role==='boss'&&account.companyId===MAIN_COMPANY_ID)))return send(res,400,{error:'Wybierz aktywne konto z listy kierowców'});
+  if(!account?.active||(isSubcontractorBoss(req)&&account.companyId!==who(req).companyId)||!(['admin','driver','probation'].includes(account.role)||(account.role==='boss'&&account.companyId===MAIN_COMPANY_ID)||account.id===who(req).id))return send(res,400,{error:'Wybierz aktywne konto z listy kierowców'});
   const plannedKm=Number(a.plannedKm);
   if(!Number.isFinite(plannedKm)||plannedKm<0||plannedKm>20000)return send(res,400,{error:'Nieprawidłowy dystans'});
   const freight=quoteFreight(plannedKm,a.cargo,a.cargoTons,a.trailerType);if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
@@ -726,7 +734,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!who(req))return send(res,401,{error:'Sesja wygasła. Zaloguj się ponownie, aby zapisać trasę.'});
   if(!canAssignRoutes(req))return send(res,403,{error:'Zleceniami zarządza główny szef lub dyspozytor.'});
   const a=await body(req),r=(db.routes||[]).find(x=>x.id===a.id);
-  if(!r)return send(res,404,{error:'Nie znaleziono trasy'});
+  if(!r||(isSubcontractorBoss(req)&&r.companyId!==who(req).companyId))return send(res,404,{error:'Nie znaleziono trasy'});
   if(r.deliveredAt||r.settledAt||r.status==='Zakończona')return send(res,409,{error:'Dystans ukończonej trasy pochodzi z dostawy ETS2.'});
   const km=Number(a.drivenKm);if(!Number.isFinite(km)||km<0||km>100000)return send(res,400,{error:'Nieprawidłowy przebieg'});
   if(!r.acceptedAt&&(km>0||a.status&&a.status!=='Przydzielona'))return send(res,409,{error:'Kierowca musi najpierw przyjąć trasę w aplikacji'});
@@ -740,18 +748,21 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   await save(db);return send(res,200,r);
  }
  if(u.pathname==='/api/finance'&&method==='GET'){
-  if(!auth(req))return send(res,401,{error:'Wymagane logowanie administratora'});
-  const ledger=db.ledger||[],expenses=db.expenses||[];return send(res,200,{ledger,expenses,revenue:ledger.reduce((a,x)=>a+Number(x.amount||0),0),costs:expenses.reduce((a,x)=>a+Number(x.amount||0),0)});
+  if(!companyManager(req))return send(res,401,{error:'Wymagane logowanie szefa'});
+  const companyId=who(req).companyId;
+  const ledger=(db.ledger||[]).filter(x=>auth(req)||x.companyId===companyId),expenses=(db.expenses||[]).filter(x=>auth(req)||expenseCompany(db,x)===companyId);return send(res,200,{ledger,expenses,revenue:ledger.reduce((a,x)=>a+Number(x.amount||0),0),costs:expenses.reduce((a,x)=>a+Number(x.amount||0),0)});
  }
  if(u.pathname==='/api/expenses'&&method==='GET'){
   if(!who(req))return send(res,401,{error:'Zaloguj się'});
-  const me=who(req);return send(res,200,canDispatch(req)&&u.searchParams.get('mine')!=='1'?(db.expenses||[]):(db.expenses||[]).filter(e=>e.driver.toLowerCase()===me.username.toLowerCase()));
+  const me=who(req),mine=u.searchParams.get('mine')==='1';
+  return send(res,200,(db.expenses||[]).filter(e=>!mine&&canDispatch(req)||expenseCompany(db,e)===me.companyId&&
+   (!mine&&isSubcontractorBoss(req)||e.driver.toLowerCase()===me.username.toLowerCase())));
  }
  if(u.pathname==='/api/expenses'&&method==='POST'){
   if(!who(req))return send(res,401,{error:'Zaloguj się'});
   const a=await body(req),r=(db.routes||[]).find(x=>x.id===a.routeId);
   if(!r)return send(res,400,{error:'Wybierz istniejącą trasę'});
-  if(!canDispatch(req)&&(r.driver.toLowerCase()!==who(req).username.toLowerCase()||r.companyId!==who(req).companyId))return send(res,403,{error:'To nie jest Twoja trasa'});
+  if(!canDispatch(req)&&(r.companyId!==who(req).companyId||(!isSubcontractorBoss(req)&&r.driver.toLowerCase()!==who(req).username.toLowerCase())))return send(res,403,{error:'To nie jest Twoja trasa'});
   if(!['Paliwo','Opłata drogowa','Parking','Inne'].includes(a.type))return send(res,400,{error:'Nieprawidłowy rodzaj kosztu'});
   const amount=Number(a.amount);if(!Number.isFinite(amount)||amount<=0||amount>1000000)return send(res,400,{error:'Nieprawidłowa kwota'});
   const e={id:crypto.randomUUID(),routeId:r.id,companyId:r.companyId,driver:r.driver,type:a.type,country:str(a.country,80),from:str(a.from,120),to:str(a.to,120),place:str(a.place,120),liters:Number(a.liters)||0,amount,currency:'PLN',createdAt:new Date().toISOString()};
@@ -782,6 +793,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(!auth(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Brak dostępu do floty firmy'});
    return send(res,200,{fleet:fleet.filter(vehicle=>vehicle.companyId===me.companyId)});
   }
+  if(isSubcontractorBoss(req)&&u.searchParams.get('mine')!=='1')return send(res,200,{fleet:fleet.filter(v=>v.companyId===me.companyId),drivers:[]});
   if(auth(req)&&u.searchParams.get('mine')!=='1')return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{fleet:fleet.filter(v=>v.driverAccountId===me.id&&v.companyId===me.companyId)});
  }
@@ -881,6 +893,24 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   }
   return send(res,404,{error:'Nie znaleziono.'});
  }
+ if(u.pathname==='/api/company/trailer-license'&&method==='POST'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
+  const a=await body(req),me=who(req);
+  const licenses=db.trailerLicenses??={};
+  if(a.decision){
+   if(me.role!=='admin')return send(res,403,{error:'Licencje rozpatruje administracja.'});
+   const license=Object.hasOwn(licenses,a.companyId)?licenses[a.companyId]:null;
+   if(!license||license.status!=='pending')return send(res,409,{error:'Brak oczekującego wniosku.'});
+   if(!['approved','rejected'].includes(a.decision))return send(res,400,{error:'Wybierz decyzję.'});
+   Object.assign(license,{status:a.decision,decidedBy:me.username,decidedAt:new Date().toISOString()});
+   await save(db);return send(res,200,license);
+  }
+  const previous=Object.hasOwn(licenses,me.companyId)?licenses[me.companyId]:null;
+  if(previous&&previous.status!=='rejected')return send(res,409,{error:'Firma ma już licencję albo oczekujący wniosek.'});
+  const license={status:'pending',reason:str(a.reason,500),submittedBy:me.username,createdAt:new Date().toISOString()};
+  Object.defineProperty(licenses,me.companyId,{value:license,enumerable:true,writable:true,configurable:true});
+  await save(db);return send(res,201,license);
+ }
  if(u.pathname==='/api/company/management'&&method==='GET'){
   if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
   const companyId=u.searchParams.get('companyId')||who(req).companyId;
@@ -893,6 +923,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    fleet:(db.fleet||[]).filter(x=>(x.companyId||MAIN_COMPANY_ID)===companyId),
    trailers:(db.trailers||[]).filter(x=>(x.ownerCompanyId||MAIN_COMPANY_ID)===companyId),
    drivers:(db.accounts||[]).filter(x=>x.companyId===companyId&&employee(x)).map(safeAccount),
+   trailerLicense:Object.hasOwn(db.trailerLicenses||{},companyId)?db.trailerLicenses[companyId]:null,
    accessoryRequests:(db.shopOrders||[]).filter(o=>o.category==='lights'&&(o.companyId||accounts.get(o.driver)?.companyId||MAIN_COMPANY_ID)===companyId),
    requests:(db.vehicleRequests||[]).filter(x=>x.companyId===companyId),
   });
@@ -957,6 +988,10 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(u.pathname==='/api/fleet/buy')return send(res,409,{error:'Złóż wniosek w zakładce Moja firma.'});
   const a=await body(req),companyId=who(req).companyId;
   if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Nie znaleziono firmy.'});
+  if(a.kind==='trailer'&&companyId!==MAIN_COMPANY_ID&&
+     (!Object.hasOwn(db.trailerLicenses||{},companyId)||db.trailerLicenses[companyId].status!=='approved')){
+   return send(res,403,{error:'Firma potrzebuje zatwierdzonej licencji na własne naczepy.'});
+  }
   const kind=str(a.kind,10),financing=str(a.financing,10),brand=str(a.brand,60),model=str(a.model,100);
   const chassis=str(a.chassis,10),color=str(a.color,60),emission=kind==='truck'?str(a.emission,10):'';
   const mileage=Number(a.mileage),amount=priceCents(a.amount),listing=str(a.listing,2048);
@@ -1065,7 +1100,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDrive(req))return send(res,403,{error:'Brak dostępu do ustawień konta.'});
   if(!rate(req,'change-password:'+account.id,6))return send(res,429,{error:'Za dużo prób. Spróbuj za minutę.'});
   const a=await body(req),current=str(a.currentPassword,300),next=a.newPassword;
-  if(typeof next!=='string'||next.length<6||next.length>300||next!==next.trim())return send(res,400,{error:'Nowe hasło musi mieć od 12 do 300 znaków, bez spacji na początku i końcu.'});
+  if(typeof next!=='string'||next.length<6||next.length>300||next!==next.trim())return send(res,400,{error:'Nowe hasło musi mieć od 6 do 300 znaków, bez spacji na początku i końcu.'});
   const candidate=crypto.scryptSync(current,account.salt,64);
   if(!crypto.timingSafeEqual(candidate,Buffer.from(account.hash,'hex')))return send(res,403,{error:'Obecne hasło jest nieprawidłowe.'});
   const updated={...account,...passwordHash(next)};
@@ -1174,7 +1209,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,404,{error:'Nie znaleziono'});
  }
  if(method!=='GET')return send(res,405,{error:'Metoda niedozwolona'});
- const homePath=auth(req)?'/system.html':isSubcontractorBoss(req)?'/admin.html':canDispatch(req)?'/spedytor.html':canDrive(req)?'/moj-panel.html':'/system-login.html';
+ const homePath=auth(req)?'/system.html':isSubcontractorBoss(req)?'/firma.html':canDispatch(req)?'/spedytor.html':canDrive(req)?'/moj-panel.html':'/system-login.html';
  if(['/','/system','/index.html','/login.html'].includes(u.pathname)||(u.pathname==='/system-login.html'&&homePath!==u.pathname)){
   res.writeHead(302,{Location:homePath,'Cache-Control':'no-store'});return res.end();
  }
@@ -1186,11 +1221,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(who(req))return send(res,403,{error:'Mapa floty jest dostępna dla dyspozytorni.'});
   res.writeHead(302,{Location:'/system-login.html'});return res.end();
  }
- if(u.pathname==='/gielda.html'&&!canDispatch(req)){
+ if(u.pathname==='/gielda.html'&&!canDispatch(req)&&!isSubcontractorBoss(req)){
   res.writeHead(302,{Location:homePath,'Cache-Control':'no-store'});return res.end();
  }
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:homePath});return res.end()}
- if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/firma.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(['/flota-online.html','/firma.html'].includes(u.pathname)&&!canDispatch(req)&&!(u.pathname==='/firma.html'&&isSubcontractorBoss(req)))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
+ if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/firma.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(['/flota-online.html','/firma.html'].includes(u.pathname)&&!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)&&!isSubcontractorBoss(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);
  if(file==='podwykonawcy.html'){
   if(!auth(req))return send(res,403,{error:'Tylko główny szef lub administrator'});
