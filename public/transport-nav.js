@@ -12,13 +12,13 @@
  const links=main?[
   ['/system.html','Przegląd'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],
   ['/centrum-floty.html','Mapa kierowców'],['/flota-online.html','Flota'],['/dokumenty.html','Dokumenty'],
-  ['/admin.html','Rekrutacja'],['/firma.html','Moja firma'],['/podwykonawcy.html','Podwykonawcy'],
+  ['/wnioski.html','Wnioski'],['/admin.html','Rekrutacja'],['/firma.html','Moja firma'],['/podwykonawcy.html','Podwykonawcy'],
   ['/uzytkownicy.html','Role pracowników'],['/naczepy.html','Naczepy'],['/budzety.html','Budżety firm'],
   ['/ekonomia.html','Ekonomia'],['/moj-panel.html','Panel kierowcy'],['/telemetry.html','Aplikacja Windows']
  ]:partner?[
   ['/firma.html','Moja firma'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],
   ['/centrum-floty.html','Mapa kierowców'],['/flota-online.html','Flota'],['/naczepy.html','Naczepy'],
-  ['/dokumenty.html','Dokumenty'],['/admin.html','Rekrutacja'],['/ekonomia.html','Ekonomia'],
+  ['/dokumenty.html','Dokumenty'],['/wnioski.html','Wnioski'],['/admin.html','Rekrutacja'],['/ekonomia.html','Ekonomia'],
   ['/firma.html#companyDrivers','Kierowcy'],['/moj-panel.html#settings','Ustawienia konta'],['/moj-panel.html','Panel kierowcy'],['/telemetry.html','Aplikacja Windows']
  ]:[
   ...(user.dispatchAccess?[['/moj-panel.html','Mój panel']]:[]),['/spedytor.html','Dyspozytor'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],['/centrum-floty.html','Mapa kierowców']
@@ -30,7 +30,7 @@
   const link=document.createElement('a');
   link.href=href;
   link.textContent=label;
-  if(location.pathname+location.hash===href)link.setAttribute('aria-current','page');
+  if((href.includes('#')?location.pathname+location.hash:location.pathname)===href)link.setAttribute('aria-current','page');
   menu.append(link);
  }
  document.body.classList.add('has-transport-menu');
