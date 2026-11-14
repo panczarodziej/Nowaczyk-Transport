@@ -29,7 +29,7 @@ button+button{margin-left:8px}
 <main>
 <a href="/">← Wróć do panelu</a>
 <h1 id="title">Moja firma</h1>
-<nav><a href="/admin.html">Rekrutacja</a> · <a href="/centrum-floty.html">Mapa kierowców</a> <a id="partnerLink" href="/podwykonawcy.html" hidden> · Podwykonawcy</a></nav>
+<nav><a href="/dokumenty.html">Dokumenty transportowe</a> · <a href="/admin.html">Rekrutacja</a> · <a href="/centrum-floty.html">Mapa kierowców</a> <a id="partnerLink" href="/podwykonawcy.html" hidden> · Podwykonawcy</a></nav>
 <p id="settingsStatus" role="status"></p>
 <form id="createCompany" hidden>
  <label>Nazwa firmy <input name="name" required minlength="2" maxlength="90"></label>
@@ -210,6 +210,7 @@ async function loadCompanies(){
  const cards=await Promise.all(visible.map(async company=>{
   const card=element('article');
   card.append(element('h2',company.name));
+  if(partners){const link=element('a','Dokumenty i przeglądy');link.href='/dokumenty.html?companyId='+encodeURIComponent(company.id);card.append(link)}
   if(company.logo){const img=element('img');img.src=company.logo;img.alt='Logo '+company.name;img.style.maxWidth='150px';card.append(img)}
   const logoLabel=element('label','Logo firmy '),logo=element('input');logo.type='file';logo.accept='image/png,image/jpeg,image/webp';logoLabel.append(logo);
   const update=fields=>api('/api/admin/companies','PATCH',{id:company.id,...fields});

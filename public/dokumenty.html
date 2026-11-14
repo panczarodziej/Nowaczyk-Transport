@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dokumenty transportowe — Nowaczyk Transport</title>
+<style>
+body{margin:0;background:#f1f4f7;color:#182c43;font:16px system-ui,sans-serif}
+main{max-width:1020px;margin:auto;padding:24px}
+section,article{background:#fff;border:1px solid #d1dfee;border-radius:12px;padding:18px;margin:14px 0}
+form,dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+label{display:grid;align-content:start;gap:4px}
+input,select,textarea,button{box-sizing:border-box;min-width:0;font:inherit;padding:8px}
+button{background:#205c97;border:0;border-radius:6px;color:white;cursor:pointer;align-self:end}
+a{color:#12568c} dt{font-weight:600}dd{margin:0;overflow-wrap:anywhere}
+summary{cursor:pointer} [hidden]{display:none!important}
+@media print{body{background:#fff}main{padding:0}main>*{display:none!important}#deliveries{display:block!important;border:0;padding:0}#deliveries>*{display:none!important}#deliveries article.printing{display:block!important;border:0}button{display:none!important}}
+</style>
+</head>
+<body><main>
+<a href="/">← Panel</a>
+<h1>Dokumenty transportowe</h1>
+<p id="company"></p>
+<p id="status" role="status"></p>
+<section id="deliveries">
+<h2>CMR i potwierdzenia dostaw</h2>
+<p>Dokumenty do symulacji ETS2.</p>
+<details id="newCmr"><summary>Zapisz CMR po dostawie</summary>
+<form id="cmr">
+<label>Zakończona dostawa <select name="routeId" required></select></label>
+<label>Nadawca i adres <input name="sender" maxlength="200"></label>
+<label>Odbiorca i adres <input name="consignee" maxlength="200"></label>
+<label>Osoba odbierająca <input name="receiver" maxlength="140" required></label>
+<label>Data odbioru <input name="receivedDate" type="date" required></label>
+<label>Wynik odbioru <select name="result"><option value="ok">Bez zastrzeżeń</option><option value="remarks">Z zastrzeżeniami</option></select></label>
+<label>Liczba sztuk i opakowanie <input name="packages" maxlength="150" placeholder="np. 24 palety"></label>
+<label>Rejestracja ciągnika <input name="plate" maxlength="30"></label>
+<label>Rejestracja naczepy <input name="trailerPlate" maxlength="30"></label>
+<label>Zastrzeżenia / uwagi <textarea name="notes" maxlength="1000"></textarea></label>
+<button>Zapisz CMR</button>
+</form></details>
+<p id="emptyCmr"></p>
+</section>
+<section id="inspections" hidden>
+<h2>Przeglądy ciągników i naczep</h2>
+<ul id="deadlines"></ul>
+<details id="newInspection"><summary>Dodaj wynik przeglądu</summary>
+<form id="inspection">
+<label>Pojazd <select name="vehicleId" required></select></label>
+<label>Data badania <input name="date" type="date" required></label>
+<label>Wynik <select name="result"><option value="ok">Pozytywny</option><option value="failed">Negatywny</option></select></label>
+<label>Termin następnego badania <input name="nextDate" type="date"></label>
+<label>Stacja / warsztat <input name="station" maxlength="150" required></label>
+<label>Przebieg pojazdu (km) <input name="mileage" type="number" min="0" max="99999999"></label>
+<label>Numer zaświadczenia <input name="reference" maxlength="100"></label>
+<label>Uwagi / usterki <textarea name="notes" maxlength="1000"></textarea></label>
+<button>Zapisz przegląd</button>
+</form></details>
+<h3>Historia przeglądów</h3>
+<ul id="inspectionHistory"></ul>
+</section>
+</main>
+<script>
+const get=id=>document.getElementById(id);
+const base='/api/transport-documents';
+const query=location.search;
+const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Warsaw'}).format(new Date());
+function make(tag,value){const el=document.createElement(tag);if(value!=null)el.textContent=value;return el}
+async function request(path='',data){
+ const response=await fetch(base+path+query,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});
+ const result=await response.json();
+ if(!response.ok)throw Error(result.error);
+ return result;
+}
+function options(select,items,label){
+ select.replaceChildren(...items.map(item=>{const el=make('option',label(item));el.value=item.id;return el}));
+}
+function renderCmr(doc){
+ const article=make('article');
+ article.append(make('h3',doc.number),make('p','Potwierdzenie dostawy · ETS2'));
+ const list=make('dl');
+ for(const [label,value] of [
+  ['Nadawca',doc.sender],['Przewoźnik',doc.carrier],['Odbiorca',doc.consignee],
+  ['Załadunek',doc.from],['Rozładunek',doc.to],['Ładunek',doc.cargo],['Masa',doc.cargoTons!=null?doc.cargoTons+' t':''],
+  ['Sztuki / opakowanie',doc.packages],['Kierowca',doc.driver],['Ciągnik',doc.plate],['Naczepa',doc.trailerPlate],
+  ['Osoba odbierająca',doc.receiver],['Data odbioru',doc.receivedDate],['Wynik',doc.result==='ok'?'Bez zastrzeżeń':'Z zastrzeżeniami'],['Uwagi',doc.notes]
+ ]){
+  const row=make('div');row.append(make('dt',label),make('dd',value||'—'));list.append(row);
+ }
+ const print=make('button','Drukuj / zapisz PDF');
+ print.onclick=()=>{article.classList.add('printing');window.print();article.classList.remove('printing')};
+ article.append(list,print);
+ return article;
+}
+async function refresh(){
+ const data=await request();
+ get('company').textContent=data.company;
+ const done=new Set(data.cmrs.map(doc=>doc.routeId));
+ const routes=data.routes.filter(route=>!done.has(route.id));
+ const form=get('cmr');
+ options(form.elements.routeId,routes,r=>[r.from+' → '+r.to,r.cargo,r.driver,r.deliveredAt?.slice(0,10)].filter(Boolean).join(' · '));
+ const fillRoute=()=>{
+  const route=routes.find(r=>r.id===form.elements.routeId.value);
+  form.elements.sender.value=route?.sourceCompany||'';
+  form.elements.consignee.value=route?.destinationCompany||'';
+  form.elements.receivedDate.value=route?.deliveredAt?.slice(0,10)||today;
+ };
+ form.elements.routeId.onchange=fillRoute;fillRoute();
+ get('newCmr').hidden=!routes.length;
+ get('emptyCmr').textContent=routes.length||data.cmrs.length?'':'Brak zakończonych dostaw do udokumentowania.';
+ get('deliveries').querySelectorAll('article').forEach(el=>el.remove());
+ get('deliveries').append(...[...data.cmrs].reverse().map(renderCmr));
+ get('inspections').hidden=!data.manager;
+ if(!data.manager)return;
+ const history=[...data.inspections].sort((a,b)=>b.date.localeCompare(a.date)||b.createdAt.localeCompare(a.createdAt));
+ options(get('inspection').elements.vehicleId,data.fleet,v=>v.plate+' · '+v.model);
+ get('newInspection').hidden=!data.fleet.length;
+ get('deadlines').replaceChildren(...data.fleet.map(v=>{
+  const latest=history.find(h=>h.vehicleId===v.id);
+  const text=!latest?'Brak wpisu':latest.result==='failed'?'Wynik negatywny':latest.nextDate<today?'Po terminie od '+latest.nextDate:'Ważny do '+latest.nextDate;
+  return make('li',v.plate+' · '+v.model+' — '+text);
+ }));
+ get('inspectionHistory').replaceChildren(...history.map(h=>make('li',[
+  h.date,h.plate,h.station,h.result==='ok'?'Pozytywny':'Negatywny',h.nextDate?'Następny: '+h.nextDate:'',
+  h.mileage!=null?h.mileage+' km':'',h.reference,h.notes
+ ].filter(Boolean).join(' · '))));
+}
+for(const id of ['cmr','inspection']){
+ const form=get(id);
+ form.onsubmit=async event=>{
+  event.preventDefault();
+  const button=event.submitter;
+  button.disabled=true;
+  try{
+   await request('/'+id,Object.fromEntries(new FormData(form)));
+   form.reset();
+   await refresh();
+   get('status').textContent=id==='cmr'?'CMR zapisany.':'Przegląd zapisany.';
+  }catch(error){get('status').textContent=error.message}
+  finally{button.disabled=false}
+ };
+}
+get('inspection').elements.date.value=today;
+refresh().catch(error=>{get('status').textContent=error.message});
+</script>
+</body></html>

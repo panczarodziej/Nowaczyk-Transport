@@ -138,6 +138,11 @@ function priceCents(value){
  if(typeof value!=='string'||!/^(0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(value))return null;
  return Math.round(Number(value)*100);
 }
+function validDate(value){
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+ const date=new Date(value+'T00:00:00Z');
+ return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===value;
+}
 function httpsLink(value){
  try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password}catch{return false}
 }
@@ -179,7 +184,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const key=sessionKey(req);
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
- if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&
+ if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
     !['/api/company/management','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/fleet'&&u.searchParams.get('company')==='1')&&
     !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
@@ -708,6 +713,65 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!v){v={id:crypto.randomUUID()};db.fleet.push(v)}
   Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:v.purchasedAt?v.companyId:acct?.companyId||MAIN_COMPANY_ID});
   await save(db);return send(res,200,v);
+ }
+ if(u.pathname.startsWith('/api/transport-documents')){
+  const me=who(req),manager=companyManager(req);
+  if(!me||(!manager&&!canDrive(req)))return send(res,403,{error:'Brak dostępu do dokumentów.'});
+  const companyId=auth(req)?u.searchParams.get('companyId')||me.companyId:me.companyId;
+  const routes=(db.routes||[]).filter(r=>r.companyId===companyId&&
+   (manager||r.driver.toLowerCase()===me.username.toLowerCase())&&
+   (r.deliveredAt||r.settledAt||r.status==='Zakończona'));
+  const fleet=manager?[
+   ...(db.fleet||[]).filter(v=>(v.companyId||MAIN_COMPANY_ID)===companyId),
+   ...(db.trailers||[]).filter(v=>(v.ownerCompanyId||MAIN_COMPANY_ID)===companyId)
+  ]:[];
+  const company=db.companies.find(c=>c.id===companyId);
+  if(!company)return send(res,404,{error:'Nie znaleziono firmy.'});
+  if(u.pathname==='/api/transport-documents'&&method==='GET'){
+   const routeIds=new Set(routes.map(r=>r.id));
+   return send(res,200,{company:company.name,manager,routes:routes.map(({id,driver,from,to,sourceCompany,destinationCompany,cargo,cargoTons,deliveredAt,settledAt})=>
+    ({id,driver,from,to,sourceCompany,destinationCompany,cargo,cargoTons,deliveredAt:deliveredAt||settledAt})),
+    cmrs:(db.cmrDocuments||[]).filter(d=>routeIds.has(d.routeId)),
+    fleet:fleet.map(({id,plate,model})=>({id,plate,model})),
+    inspections:manager?(db.vehicleInspections||[]).filter(d=>d.companyId===companyId):[]});
+  }
+  if(u.pathname==='/api/transport-documents/cmr'&&method==='POST'){
+   const a=await body(req),route=routes.find(r=>r.id===a.routeId);
+   if(!route)return send(res,404,{error:'Nie znaleziono zakończonej dostawy.'});
+   const existing=(db.cmrDocuments||[]).find(d=>d.routeId===route.id);
+   if(existing)return send(res,409,{error:'Ta dostawa ma już zapisany CMR.'});
+   const receiver=str(a.receiver,140),receivedDate=str(a.receivedDate,10);
+   const result=str(a.result,20),notes=str(a.notes,1000);
+   if(!receiver||!validDate(receivedDate)||!['ok','remarks'].includes(result)||(result==='remarks'&&!notes)){
+    return send(res,400,{error:'Podaj odbiorcę, datę i wynik odbioru. Wpisz uwagi, jeśli zgłoszono zastrzeżenia.'});
+   }
+   const document={routeId:route.id,companyId,number:'CMR-'+route.id.toUpperCase(),receiver,receivedDate,result,notes,
+    carrier:company.name,driver:route.driver,sender:str(a.sender,200)||route.sourceCompany,
+    consignee:str(a.consignee,200)||route.destinationCompany,from:route.from,to:route.to,
+    cargo:route.cargo,cargoTons:route.cargoTons,packages:str(a.packages,150),plate:str(a.plate,30).toUpperCase(),
+    trailerPlate:str(a.trailerPlate,30).toUpperCase(),createdBy:me.username,createdAt:new Date().toISOString()};
+   (db.cmrDocuments??=[]).push(document);
+   await save(db);
+   return send(res,201,document);
+  }
+  if(u.pathname==='/api/transport-documents/inspection'&&method==='POST'){
+   if(!manager)return send(res,403,{error:'Przeglądy wpisuje szef firmy.'});
+   const a=await body(req),vehicle=fleet.find(v=>v.id===a.vehicleId);
+   if(!vehicle)return send(res,404,{error:'Wybierz pojazd z floty firmy.'});
+   const date=str(a.date,10),nextDate=str(a.nextDate,10),result=str(a.result,15),notes=str(a.notes,1000),station=str(a.station,150);
+   if(!validDate(date)||(nextDate&&(!validDate(nextDate)||nextDate<date))||!['ok','failed'].includes(result)||
+      (result==='ok'&&!nextDate)||(!notes&&result==='failed')||!station){
+    return send(res,400,{error:'Sprawdź daty i podaj stację, wynik oraz usterki przy wyniku negatywnym.'});
+   }
+   const mileage=a.mileage===''||a.mileage===undefined?null:Number(a.mileage);
+   if(mileage!==null&&(!Number.isSafeInteger(mileage)||mileage<0||mileage>99999999))return send(res,400,{error:'Nieprawidłowy przebieg pojazdu.'});
+   const inspection={id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,plate:vehicle.plate,model:vehicle.model,
+    date,nextDate,result,notes,station,mileage,reference:str(a.reference,100),createdBy:me.username,createdAt:new Date().toISOString()};
+   (db.vehicleInspections??=[]).push(inspection);
+   await save(db);
+   return send(res,201,inspection);
+  }
+  return send(res,404,{error:'Nie znaleziono.'});
  }
  if(u.pathname==='/api/company/management'&&method==='GET'){
   if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
