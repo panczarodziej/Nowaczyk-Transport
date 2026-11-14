@@ -52,7 +52,7 @@ button+button{margin-left:8px}
 <article><h2>Koszty</h2><strong id="costCents">—</strong></article>
 </div>
 <p id="moneyStatus" role="status"></p>
-<h2>Wniosek o zakup lub leasing</h2>
+<h2 id="vehicleRequests">Wniosek o zakup lub leasing</h2>
 <form id="vehicleRequest" class="grid">
  <label>Pojazd <select name="kind"><option value="truck">Ciągnik</option><option value="trailer">Naczepa</option></select></label>
  <label>Finansowanie <select name="financing"><option value="cash">Gotówka</option><option value="lease">Leasing</option></select></label>
@@ -169,7 +169,7 @@ function renderManagement(card,company,data,user){
   formField(form,'Kwota (PLN)','amount',{type:'number',min:'0.01',step:'0.01'});
   form.append(button);card.append(form);
  }
- card.append(element('h3','Kierowcy'));
+ const driverHeading=element('h3','Kierowcy');if(!partners)driverHeading.id='companyDrivers';card.append(driverHeading);
  if(!partners)card.append(element('p','Kierowcę możesz zatrudnić, gdy główny szef przygotuje konto w Twojej firmie.'));
 
  if(!data.drivers.length)card.append(element('p','Brak kont kierowców w firmie.'));
@@ -199,6 +199,24 @@ function renderManagement(card,company,data,user){
   card.append(row);
  }
  if(!data.accessoryRequests.length)card.append(element('p','Brak wniosków o dodatki.'));
+ if(company.id!=='nowaczyk'){
+  const heading=element('h3','Licencja na własne naczepy');
+  if(!partners)heading.id='trailerLicense';
+  const license=data.trailerLicense;
+  card.append(heading,element('p',license?({pending:'Oczekuje na decyzję',approved:'Zatwierdzona',rejected:'Odrzucona'}[license.status]):'Brak licencji.'));
+  if(license?.reason)card.append(element('p',license.reason));
+  if(!partners&&(!license||license.status==='rejected')){
+   const {form,button}=managementForm('Złóż wniosek o licencję',values=>api('/api/company/trailer-license','POST',values));
+   formField(form,'Uzasadnienie','reason',{maxLength:500,required:false});form.append(button);card.append(form);
+  }
+  if(canReview&&license?.status==='pending'){
+   for(const [decision,label] of [['approved','Zatwierdź licencję'],['rejected','Odrzuć licencję']]){
+    const button=element('button',label);
+    button.onclick=()=>action(button,()=>api('/api/company/trailer-license','POST',{companyId:company.id,decision}));
+    card.append(button);
+   }
+  }
+ }
  card.append(element('h3','Wnioski flotowe'));
  if(!data.requests.length)card.append(element('p','Brak wniosków.'));
  for(const request of [...data.requests].reverse()){
@@ -313,7 +331,7 @@ else{
  refreshMoney();
  setInterval(refreshMoney,15000);
 }
-loadCompanies().catch(error=>{get('settingsStatus').textContent=error.message});
+loadCompanies().then(()=>{if(location.hash==='#trailerLicense'||location.hash==='#companyDrivers')get(location.hash.slice(1))?.scrollIntoView()}).catch(error=>{get('settingsStatus').textContent=error.message});
 
 </script>
 </body>
