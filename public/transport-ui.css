@@ -90,3 +90,18 @@ body.has-transport-menu > header{position:relative;z-index:901}
  body.has-transport-menu{padding-left:0}
  .persistent-menu{display:none!important}
 }
+header.transport-heading {
+ display:grid;grid-template-columns: minmax(0,1fr) auto minmax(0,1fr);
+ align-items:center;gap:12px;min-height:62px;height:auto;padding:12px 24px;
+}
+.transport-wordmark{color:white;font-weight:800;letter-spacing:.02em;text-decoration:none;justify-self:start}
+.transport-heading-title{font-size:17px;font-weight:700;text-align:center}
+.transport-heading-actions{display:flex;gap:12px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.transport-heading-actions a[aria-current="page"]{display:none}
+@media(max-width:700px){
+ header.transport-heading{grid-template-columns:1fr auto;padding:10px 14px}
+ .transport-heading-title{grid-column:1/-1;grid-row:2;text-align:left}
+ .transport-heading-actions{grid-row:1;grid-column:2}
+}
+@media print{body[data-view="dokumenty"] .transport-heading{display:none}}
+.transport-wordmark::before{content:"N";display:inline-grid;place-items:center;width:28px;height:28px;margin-right:8px;border:1px solid #72cbe8;border-radius:5px;color:#bcecff}
