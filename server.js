@@ -433,8 +433,29 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const funding=db.startupFinance?.[c.id];
    const b=entries.find(x=>x.companyId===c.id)||funding;
    const {income,costs}=companyCashFlow(db,c.id);
-   return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id),fundingSource:funding?.source,loanRemainingCents:funding?.remainingCents??0,locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b?b.initialCents+income-costs:null};
+   return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id),fundingSource:funding?.source,loanRemainingCents:db.companyLoans?.[c.id]?.remainingCents??funding?.remainingCents??0,locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b||db.companyLoans?.[c.id]?(b?.initialCents??0)+income-costs:null};
   });return send(res,200,budgets);
+ }
+ if(u.pathname==='/api/company/loan'&&method==='POST'){
+  if(!auth(req)||who(req).companyId!==MAIN_COMPANY_ID)return send(res,403,{error:'Tylko kierownictwo Nowaczyk Transport.'});
+  const a=await body(req),cents=priceCents(a.amount),companyId=MAIN_COMPANY_ID;
+  if(!cents)return send(res,400,{error:'Podaj dodatnią kwotę w PLN.'});
+  const loans=db.companyLoans??={},current=loans[companyId];
+  const createdAt=new Date().toISOString();
+  if(a.action==='repay'){
+   if(!current||cents>current.remainingCents)return send(res,400,{error:'Kwota przekracza pozostały kredyt.'});
+   const budget=pool?(await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId])).rows[0]?.initial_cents:db.initialBudgets?.[companyId]?.initialCents;
+   const {income,costs}=companyCashFlow(db,companyId);
+   if(Number(budget??0)+income-costs<cents)return send(res,409,{error:'Za mało środków na koncie firmy.'});
+   current.remainingCents-=cents;
+   (db.ledger??=[]).push({id:crypto.randomUUID(),companyId,type:'spłata kredytu',amount:-cents/100,createdAt});
+   await save(db);return send(res,200,current);
+  }
+  if(a.action!=='borrow'||cents>50000000)return send(res,400,{error:'Wybierz kredyt do 500 000 zł.'});
+  if(current?.remainingCents>0)return send(res,409,{error:'Najpierw spłać aktywny kredyt.'});
+  loans[companyId]={remainingCents:cents,createdAt};
+  (db.ledger??=[]).push({id:crypto.randomUUID(),companyId,type:'kredyt firmowy',amount:cents/100,createdAt});
+  await save(db);return send(res,201,loans[companyId]);
  }
  if(u.pathname==='/api/company/startup-finance'&&method==='POST'){
   if(!isSubcontractorBoss(req))return send(res,403,{error:'Finansowanie uruchamia szef podwykonawcy.'});
@@ -1084,7 +1105,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
     ?(await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId])).rows[0]?.initial_cents
     :db.initialBudgets?.[companyId]?.initialCents);
    const {income,costs}=companyCashFlow(db,companyId);
-   if(budget==null||Number(budget)+income-costs<downPayment)return send(res,409,{error:'Firma nie ma budżetu startowego lub wystarczających środków.'});
+   if((budget==null&&!db.companyLoans?.[companyId])||Number(budget??0)+income-costs<downPayment)return send(res,409,{error:'Firma nie ma budżetu startowego lub wystarczających środków.'});
    const vehicle={id:crypto.randomUUID(),requestId:request.id,model,plate,description,brand:request.brand,chassis:request.chassis,
     color:request.color,emission:request.emission,mileage:request.mileage,financing,purchasedAt:createdAt};
    if(kind==='truck'){
