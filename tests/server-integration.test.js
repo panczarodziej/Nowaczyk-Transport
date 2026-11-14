@@ -68,6 +68,8 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  const subAccount={username:'subboss',password:'subboss-password-only',role:'boss',companyId:company.data.id};
  assert.equal((await req('/api/accounts',subAccount,dispatcher.cookie)).status,201);
  const sub=await req('/api/accounts/login',{username:subAccount.username,password:subAccount.password});
+ assert.equal((await fetch(base+'/moj-panel.html',{headers:{Cookie:sub.cookie}})).status,200);
+ assert.equal((await req('/api/driver/map-profile',null,sub.cookie)).status,200);
  const application={fullname:'Kierowca testowy',discord:'kierowca',age:20,hours:100};
  const own=await req('/api/applications',{...application,companyId:company.data.id});
  const foreign=await req('/api/applications',{...application,companyId:'nowaczyk'});
@@ -366,6 +368,9 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/accounts/login',{username:'dispatcher1',password:'boss-new-password'})).status,200);
  assert.equal((await req('/api/login',{password:'integration-password-only'})).status,405);
  assert.equal((await req('/api/accounts/delete',{username:'driver1'},admin.cookie)).status,200);
+ const partnerDriverSession=await req('/api/desktop/login',subAccount,null,{'X-Nowaczyk-Client':'desktop'});
+ assert.equal(partnerDriverSession.status,200);
+ assert.equal((await req('/api/fleet/position',{x:15,z:30,speedKmh:60},partnerDriverSession.cookie)).status,200);
  const recycled=await req('/api/accounts',{username:'Driver1',password:'recycled-driver-password',role:'driver'},admin.cookie);
  assert.equal(recycled.status,201);
  assert.notEqual(recycled.data.id,created.data.id);
