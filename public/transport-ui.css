@@ -73,3 +73,20 @@ body[data-view="spedytor"] aside h2{padding:0 16px;font-size:17px}
 body[data-view="spedytor"] aside a{border-radius:0;padding:13px 20px}
 @media(max-width:650px){body[data-view="spedytor"] aside{width:100%}}
 @media print{body[data-view="dokumenty"] .transport-bar{display:none}}
+
+/* The header spans the portal while the active page keeps the same navigation. */
+body.has-transport-menu{padding-left:var(--transport-width);margin:0}
+body.has-transport-menu > header{margin-left:calc(-1 * var(--transport-width))}
+.has-transport-menu .transport-shell,.has-transport-menu[data-view="gielda"] .layout{display:block}
+.persistent-menu{position:fixed;inset:0 auto 0 0;width:var(--transport-width);overflow:auto;z-index:900;padding-top:75px}
+body.has-transport-menu > header{position:relative;z-index:901}
+.persistent-menu button{margin:10px 16px;max-width:calc(100% - 32px)}
+@media(max-width:700px){
+ body.has-transport-menu{padding-left:0}
+ body.has-transport-menu > header{margin-left:0}
+ .persistent-menu{position:sticky;top:0;inset-inline:auto;width:100%;padding:0}
+}
+@media print{
+ body.has-transport-menu{padding-left:0}
+ .persistent-menu{display:none!important}
+}
