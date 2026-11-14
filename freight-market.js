@@ -21,16 +21,16 @@ function countryLabel(id){
 }
 const weights=[12,14,16,18,20,22,24];
 
-function buildOffers(map,cities,quote){
+function buildOffers(map,cities,quote,excluded=new Set()){
  const receive=new Map();
- const send=[];
+ const send=[],extraSend=[];
  const refrigerated=new Set(cargoTypes.chlodnia);
  const curtain=new Set(cargoTypes.firanka);
  for(const [cityId,depots] of Object.entries(map)){
   const [city,country]=cities[cityId];
   if(!country)continue;
   for(const [company,positions] of Object.entries(depots)){
-   const rules=companyCargo[company];
+   const rules=company==='rybackie_elk'?{in:[],out:['fresh_fish']}:companyCargo[company];
    const point=(positions.easy?.[0]||positions.hard?.[0]||'').match(/^\((-?[\d.]+),\s*-?[\d.]+,\s*(-?[\d.]+)\)/);
    if(!rules||!point)continue;
    const depot={cityId,city:cityLabels.get(cityId)||city,country,company,x:Number(point[1]),z:Number(point[2])};
@@ -39,7 +39,7 @@ function buildOffers(map,cities,quote){
     receive.get(cargo).push(depot);
    }
    for(const cargo of rules.out){
-    if(cargoLabels.has(cargo)&&(refrigerated.has(cargo)||curtain.has(cargo)))send.push({...depot,cargo});
+    if(cargoLabels.has(cargo)&&(refrigerated.has(cargo)||curtain.has(cargo)))(company==='rybackie_elk'?extraSend:send).push({...depot,cargo});
    }
   }
  }
@@ -50,8 +50,9 @@ function buildOffers(map,cities,quote){
   return items[Math.floor(seed/4294967296*items.length)];
  };
  const offers=[],seen=new Set();
- for(let attempt=0;attempt<200000&&offers.length<10000;attempt++){
-  const from=pick(send);
+ let sequence=0;
+ for(let attempt=0;attempt<500000&&offers.length<25000;attempt++){
+  const from=pick(sequence>=10000&&extraSend.length&&attempt%20===0?extraSend:send);
   if(!from)break;
   const to=pick(receive.get(from.cargo)||[]);
   if(!to||from.cityId===to.cityId)continue;
@@ -61,7 +62,10 @@ function buildOffers(map,cities,quote){
   if(plannedKm<80||plannedKm>4500)continue;
   seen.add(key);
   const cargoTons=pick(weights),trailerType=refrigerated.has(from.cargo)?'chlodnia':'firanka';
-  offers.push({id:'NT-'+String(offers.length+1).padStart(5,'0'),mapSetFrom:from.cityId,mapSetTo:to.cityId,
+  sequence++;
+  // Preserve IDs of existing offers even when hiding an unsupported country.
+  if(excluded.has(regionCodes[from.country])||excluded.has(regionCodes[to.country])||[from.country,to.country].includes('westbank'))continue;
+  offers.push({id:'NT-'+String(sequence).padStart(5,'0'),mapSetFrom:from.cityId,mapSetTo:to.cityId,
    from:from.city,to:to.city,fromCountry:countryLabel(from.country),toCountry:countryLabel(to.country),fromCode:regionCodes[from.country],toCode:regionCodes[to.country],sourceCompany:from.company,destinationCompany:to.company,
    cargo:from.cargo,cargoLabel:cargoLabels.get(from.cargo),cargoTons,trailerType,plannedKm,
    freight:quote(plannedKm,trailerType,countryLabel(from.country),countryLabel(to.country))});
