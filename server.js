@@ -317,31 +317,22 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   });
  }
  if(u.pathname==='/api/fleet/positions'&&method==='GET'){
-  const companyScope=isSubcontractorBoss(req)?who(req).companyId:null;
-  if(!canDispatch(req)&&!companyScope)return send(res,403,{error:'Brak dostępu do mapy kierowców'});
+  if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Brak dostępu do mapy kierowców'});
   const now=Date.now();
   const deliveries=new Map();
   for(const event of db.telemetryEvents||[]){
-   if((!companyScope||event.companyId===companyScope)&&event.type==='job-delivered'&&event.telemetry?.destinationCity)deliveries.set(event.driver.toLowerCase(),event);
-  }
-  const reports={...db.fleetPositions};
-  for(const account of accounts.values()){
-   const key=account.username.toLowerCase();
-   if(account.active&&['driver','probation'].includes(account.role)&&!Object.hasOwn(reports,key))reports[key]={driver:account.username,companyId:account.companyId};
+   if(event.type==='job-delivered'&&event.telemetry?.destinationCity)deliveries.set(event.driver.toLowerCase(),event);
   }
   const companyNames=new Map(db.companies.map(company=>[company.id,company.name]));
-  const positions=Object.values(reports).filter(p=>{
-   if(!companyScope)return true;
-   const account=accounts.get(p.driver.toLowerCase());
-   return p.companyId===companyScope&&account?.companyId===companyScope&&account.active&&['driver','probation'].includes(account.role);
-  }).map(p=>{
+  const positions=drivingRoster(db).map(account=>{
+   const companyId=account.companyId;
+   const report=db.fleetPositions?.[account.username.toLowerCase()];
+   const p=report?.companyId===companyId?report:{driver:account.username,companyId};
    const candidates=(db.routes||[]).filter(r=>r.driver?.toLowerCase()===p.driver.toLowerCase()&&r.companyId===p.companyId&&r.acceptedAt&&!r.deliveredAt&&['Przyjęta','W trasie'].includes(r.status));
    const inProgress=candidates.filter(r=>r.status==='W trasie');
    const route=inProgress.length===1?inProgress[0]:candidates.length===1?candidates[0]:null;
    const delivery=deliveries.get(p.driver.toLowerCase());
-   const account=accounts.get(p.driver.toLowerCase());
-   const companyId=account?.companyId||p.companyId;
-   return {...p,companyId,companyName:companyNames.get(companyId)||companyId,online:now-Date.parse(p.updatedAt)<45000,dispatchRoute:route?{from:route.from,to:route.to}:null,lastDelivery:delivery?{city:delivery.telemetry.destinationCity,company:delivery.telemetry.destinationCompany}:null};
+   return {...p,companyId,companyName:companyNames.get(companyId)||companyId,online:driverOnline(db,account,now),dispatchRoute:route?{from:route.from,to:route.to}:null,lastDelivery:delivery?.companyId===companyId?{city:delivery.telemetry.destinationCity,company:delivery.telemetry.destinationCompany}:null};
 
   });
   return send(res,200,{positions,source:'telemetry-client',gameMapReady:false});
