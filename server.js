@@ -266,6 +266,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const rows=[];
   const add=(kind,id,status,label,at,url)=>rows.push({id:kind+':'+id+':'+status,label,at,url});
   const companyName=id=>db.companies.find(c=>c.id===id)?.name||'Firma';
+  for(const route of db.routes||[]){
+   if(route.companyId===me.companyId&&route.driver?.toLowerCase()===name&&route.createdAt){
+    add('route',route.id,'assigned','Przydzielona trasa · '+route.from+' → '+route.to,route.createdAt,'/moj-panel.html#routes');
+   }
+  }
   for(const a of db.applications||[]){
    if(a.applicantId===me.id&&a.status!=='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.companyName+' · '+a.status,a.acceptedAt||a.date,'/rekrutacja.html#myApplications');
    if(manager&&scope(a.companyId)&&a.status==='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.fullname+' · '+companyName(a.companyId),a.date,'/admin.html');
