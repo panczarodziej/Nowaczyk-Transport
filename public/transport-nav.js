@@ -16,7 +16,10 @@
   ['/uzytkownicy.html','Role pracowników'],['/naczepy.html','Naczepy'],['/budzety.html','Budżety firm'],
   ['/ekonomia.html','Ekonomia'],['/moj-panel.html','Panel kierowcy']
  ]:partner?[
-  ['/admin.html','Rekrutacja'],['/centrum-floty.html','Mapa kierowców'],['/dokumenty.html','Dokumenty'],['/firma.html','Moja firma']
+  ['/firma.html','Moja firma'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],
+  ['/centrum-floty.html','Mapa kierowców'],['/flota-online.html','Flota'],['/naczepy.html','Naczepy'],
+  ['/dokumenty.html','Dokumenty'],['/admin.html','Rekrutacja'],['/ekonomia.html','Ekonomia'],
+  ['/firma.html#companyDrivers','Kierowcy'],['/moj-panel.html#settings','Ustawienia konta'],['/moj-panel.html','Panel kierowcy']
  ]:[
   ...(user.dispatchAccess?[['/moj-panel.html','Mój panel']]:[]),['/spedytor.html','Dyspozytor'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],['/centrum-floty.html','Mapa kierowców']
  ];
@@ -27,7 +30,7 @@
   const link=document.createElement('a');
   link.href=href;
   link.textContent=label;
-  if(location.pathname===href)link.setAttribute('aria-current','page');
+  if(location.pathname+location.hash===href)link.setAttribute('aria-current','page');
   menu.append(link);
  }
  document.body.classList.add('has-transport-menu');
@@ -39,6 +42,14 @@
   oldMenu.remove();
  }
  const header=document.querySelector('body > header');
+ if(main||partner){
+  const switchView=document.createElement('a');
+  switchView.href='/moj-panel.html';
+  switchView.textContent='Widok kierowcy →';
+  switchView.style.marginLeft='auto';
+  if(header)header.append(switchView);
+  else menu.prepend(switchView);
+ }
  if(header)header.after(menu);
  else{
   const bar=document.createElement('header');
