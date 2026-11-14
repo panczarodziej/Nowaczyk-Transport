@@ -54,6 +54,7 @@ dialog{border:1px solid #b8cbd9;border-radius:8px;padding:22px;width:min(420px,9
 <dialog id="assign"><form id="assignment">
 <strong id="selection"></strong>
 <label>Kierowca<select name="driver" required></select></label>
+<label>Pusty przebieg (km) <input name="emptyKm" type="number" min="0" max="20000" value="0"></label>
 <p id="assignmentError" role="status"></p>
 <button>Przydziel trasę</button><button class="secondary" id="cancel" type="button">Anuluj</button>
 </form></dialog>
@@ -74,7 +75,7 @@ function place(city,country,company){
  cell.append(node('small',company.replaceAll('_',' ')));return cell;
 }
 async function choose(offer){
- selected=offer;
+ selected=offer;assignment.reset();
  get('selection').textContent=offer.from+' → '+offer.to+' · '+offer.cargoLabel;
  get('assignmentError').textContent='';
  const drivers=await api('/api/routes/assignees');
@@ -99,7 +100,7 @@ async function load(target=1){
    const freight=node('td',pln.format(offer.freight));freight.className='amount';
    const action=node('td',offer.id);
    if(data.assign){
-    const button=node('button','Przydziel');
+    const button=node('button','Przydziel');button.type='button';
     button.onclick=async()=>{button.disabled=true;try{await choose(offer)}catch(error){get('status').textContent=error.message}finally{button.disabled=false}};
     action.replaceChildren(button);
    }
@@ -125,9 +126,9 @@ get('next').onclick=()=>load(page+1);
 get('cancel').onclick=()=>dialog.close();
 assignment.onsubmit=async event=>{
  event.preventDefault();
- const button=event.submitter;button.disabled=true;
+ const button=event.submitter||assignment.querySelector('button');button.disabled=true;
  try{
-  await api('/api/routes',{offerId:selected.id,driver:assignment.elements.driver.value});
+  await api('/api/routes',{offerId:selected.id,driver:assignment.elements.driver.value,emptyKm:Number(assignment.elements.emptyKm.value)});
   dialog.close();
   get('status').textContent='Trasa przydzielona kierowcy.';
   await load(page);
