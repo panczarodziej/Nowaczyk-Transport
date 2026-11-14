@@ -59,6 +59,25 @@ summary{cursor:pointer} [hidden]{display:none!important}
 <h3>Historia przeglądów</h3>
 <ul id="inspectionHistory"></ul>
 </section>
+<section id="permits" hidden>
+<h2>Ubezpieczenia i winiety</h2>
+<details id="newPermit"><summary>Dodaj dokument</summary>
+<form id="permit">
+<label>Pojazd <select name="vehicleId" required></select></label>
+<label>Dokument <select name="kind"><option value="insurance">Ubezpieczenie</option><option value="vignette">Winieta</option></select></label>
+<label>Rodzaj <input name="type" maxlength="80" placeholder="np. OC, AC lub winieta miesięczna" required></label>
+<label><span id="issuerLabel">Ubezpieczyciel</span><input name="issuer" maxlength="150" required></label>
+<label>Numer polisy lub winiety <input name="reference" maxlength="100" required></label>
+<label>Ważność od <input name="starts" type="date" required></label>
+<label>Ważność do <input name="ends" type="date" required></label>
+<label>Uwagi <textarea name="notes" maxlength="500"></textarea></label>
+<button>Zapisz dokument</button>
+</form></details>
+<h3>Ubezpieczenia</h3>
+<ul id="insuranceList"></ul>
+<h3>Winiety</h3>
+<ul id="vignetteList"></ul>
+</section>
 </main>
 <script>
 const get=id=>document.getElementById(id);
@@ -111,7 +130,18 @@ async function refresh(){
  get('deliveries').querySelectorAll('article').forEach(el=>el.remove());
  get('deliveries').append(...[...data.cmrs].reverse().map(renderCmr));
  get('inspections').hidden=!data.manager;
+ get('permits').hidden=!data.manager;
  if(!data.manager)return;
+ options(get('permit').elements.vehicleId,data.fleet,v=>v.plate+' · '+v.model);
+ get('newPermit').hidden=!data.fleet.length;
+ for(const kind of ['insurance','vignette']){
+  const records=data.permits.filter(d=>d.kind===kind).sort((a,b)=>b.ends.localeCompare(a.ends));
+  const rows=records.map(d=>{
+   const state=d.ends<today?'Wygasł':d.starts>today?'Jeszcze nie obowiązuje':'Ważny';
+   return make('li',[d.plate,d.model,d.type,d.issuer,d.reference,d.starts+' – '+d.ends,state,d.notes].filter(Boolean).join(' · '));
+  });
+  get(kind+'List').replaceChildren(...(rows.length?rows:[make('li','Brak wpisów.')]));
+ }
  const history=[...data.inspections].sort((a,b)=>b.date.localeCompare(a.date)||b.createdAt.localeCompare(a.createdAt));
  options(get('inspection').elements.vehicleId,data.fleet,v=>v.plate+' · '+v.model);
  get('newInspection').hidden=!data.fleet.length;
@@ -125,7 +155,7 @@ async function refresh(){
   h.mileage!=null?h.mileage+' km':'',h.reference,h.notes
  ].filter(Boolean).join(' · '))));
 }
-for(const id of ['cmr','inspection']){
+for(const id of ['cmr','inspection','permit']){
  const form=get(id);
  form.onsubmit=async event=>{
   event.preventDefault();
@@ -134,12 +164,17 @@ for(const id of ['cmr','inspection']){
   try{
    await request('/'+id,Object.fromEntries(new FormData(form)));
    form.reset();
+   updateIssuer();
    await refresh();
-   get('status').textContent=id==='cmr'?'CMR zapisany.':'Przegląd zapisany.';
+   get('status').textContent={cmr:'CMR zapisany.',inspection:'Przegląd zapisany.',permit:'Dokument zapisany.'}[id];
   }catch(error){get('status').textContent=error.message}
   finally{button.disabled=false}
  };
 }
+function updateIssuer(){
+ get('issuerLabel').textContent=get('permit').elements.kind.value==='insurance'?'Ubezpieczyciel':'Kraj winiety';
+}
+get('permit').elements.kind.onchange=updateIssuer;
 get('inspection').elements.date.value=today;
 refresh().catch(error=>{get('status').textContent=error.message});
 </script>

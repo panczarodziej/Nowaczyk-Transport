@@ -307,6 +307,15 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const partnerDocuments=(await req(documents+'?companyId='+encodeURIComponent(company.data.id),null,admin.cookie)).data;
  assert.equal(partnerDocuments.inspections.length,1);
  assert.equal(partnerDocuments.cmrs.length,0);
+ const permit={vehicleId:approved.data.vehicleId,kind:'insurance',type:'OC',issuer:'Test',reference:'OC/123',
+  starts:'2026-11-14',ends:'2027-11-14'};
+ assert.equal((await req(documents+'/permit',permit,login.cookie)).status,403);
+ assert.equal((await req(documents+'/permit',{...permit,ends:'2026-11-13'},docBoss.cookie)).status,400);
+ assert.equal((await req(documents+'/permit',permit,docBoss.cookie)).status,201);
+ assert.equal((await req(documents+'/permit',permit,docBoss.cookie)).status,409);
+ assert.equal((await req(documents+'/permit',{...permit,kind:'vignette',type:'Miesięczna',issuer:'Czechy',reference:'CZ-1'},docBoss.cookie)).status,201);
+ assert.equal((await req(documents+'?companyId='+encodeURIComponent(company.data.id),null,admin.cookie)).data.permits.length,2);
+ assert.deepEqual((await req(documents,null,login.cookie)).data.permits,[]);
  const summaryAfterManagement=(await req('/api/company/summary',null,admin.cookie)).data;
  assert.equal(summaryAfterManagement.km,914.8);
  assert.equal(summaryAfterManagement.deliveries,2);

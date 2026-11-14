@@ -733,6 +733,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
     ({id,driver,from,to,sourceCompany,destinationCompany,cargo,cargoTons,deliveredAt:deliveredAt||settledAt})),
     cmrs:(db.cmrDocuments||[]).filter(d=>routeIds.has(d.routeId)),
     fleet:fleet.map(({id,plate,model})=>({id,plate,model})),
+    permits:manager?(db.vehiclePermits||[]).filter(d=>d.companyId===companyId):[],
     inspections:manager?(db.vehicleInspections||[]).filter(d=>d.companyId===companyId):[]});
   }
   if(u.pathname==='/api/transport-documents/cmr'&&method==='POST'){
@@ -753,6 +754,26 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    (db.cmrDocuments??=[]).push(document);
    await save(db);
    return send(res,201,document);
+  }
+  if(u.pathname==='/api/transport-documents/permit'&&method==='POST'){
+   if(!manager)return send(res,403,{error:'Dokumenty floty wpisuje szef firmy.'});
+   const a=await body(req),vehicle=fleet.find(v=>v.id===a.vehicleId);
+   if(!vehicle)return send(res,404,{error:'Wybierz pojazd z floty firmy.'});
+   const kind=str(a.kind,20),type=str(a.type,80),issuer=str(a.issuer,150),reference=str(a.reference,100);
+   const starts=str(a.starts,10),ends=str(a.ends,10),notes=str(a.notes,500);
+   if(!['insurance','vignette'].includes(kind)||!type||!issuer||!reference||!validDate(starts)||!validDate(ends)||ends<starts){
+    return send(res,400,{error:'Uzupełnij rodzaj, ubezpieczyciela lub kraj, numer dokumentu i poprawne daty ważności.'});
+   }
+   const records=db.vehiclePermits??=[];
+   if(records.some(d=>d.vehicleId===vehicle.id&&d.companyId===companyId&&d.kind===kind&&
+      d.issuer.toLowerCase()===issuer.toLowerCase()&&d.reference.toLowerCase()===reference.toLowerCase())){
+    return send(res,409,{error:'Taki dokument jest już zapisany dla tego pojazdu.'});
+   }
+   const record={id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,plate:vehicle.plate,model:vehicle.model,
+    kind,type,issuer,reference,starts,ends,notes,createdBy:me.username,createdAt:new Date().toISOString()};
+   records.push(record);
+   await save(db);
+   return send(res,201,record);
   }
   if(u.pathname==='/api/transport-documents/inspection'&&method==='POST'){
    if(!manager)return send(res,403,{error:'Przeglądy wpisuje szef firmy.'});
