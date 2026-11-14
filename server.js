@@ -264,7 +264,10 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const name=me.username.toLowerCase(), manager=companyManager(req);
   const scope=id=>auth(req)||id===me.companyId;
   const rows=[];
-  const add=(kind,id,status,label,at,url)=>rows.push({id:kind+':'+id+':'+status,label,at,url});
+  function add(kind,id,status,label,at,url,review){
+   const key=kind+':'+id+':'+status;
+   rows.push({id:key,label,at,url:review?'/wnioski.html#'+encodeURIComponent(key):url,...(review?{review}: {})});
+  }
   const companyName=id=>db.companies.find(c=>c.id===id)?.name||'Firma';
   for(const route of db.routes||[]){
    if(route.companyId===me.companyId&&route.driver?.toLowerCase()===name&&route.createdAt){
@@ -273,21 +276,21 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   }
   for(const a of db.applications||[]){
    if(a.applicantId===me.id&&a.status!=='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.companyName+' · '+a.status,a.acceptedAt||a.date,'/rekrutacja.html#myApplications');
-   if(manager&&scope(a.companyId)&&a.status==='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.fullname+' · '+companyName(a.companyId),a.date,'/admin.html');
+   if(manager&&scope(a.companyId)&&a.status==='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.fullname+' · '+companyName(a.companyId),a.date,'/admin.html',{kind:'job',id:a.id,details:[a.discord,a.age!=null?'Wiek: '+a.age:'',a.hours!=null?'ETS2: '+a.hours+' h':'',a.experience,a.availability,a.reason].filter(Boolean),acceptOnly:!auth(req)});
   }
   for(const r of db.vehicleRequests||[]){
    const label=(r.kind==='trailer'?'Naczepa':'Ciągnik')+' · '+r.model;
-   if(r.status==='pending'&&manager&&scope(r.companyId))add('vehicle',r.id,r.status,'Nowy wniosek · '+companyName(r.companyId)+' · '+label,r.createdAt,r.companyId===me.companyId?'/firma.html#vehicleRequests':'/podwykonawcy.html');
+   if(r.status==='pending'&&manager&&scope(r.companyId))add('vehicle',r.id,r.status,'Nowy wniosek · '+companyName(r.companyId)+' · '+label,r.createdAt,'/firma.html#vehicleRequests',auth(req)?{kind:'vehicle',id:r.id,lease:r.financing==='lease',details:[r.brand,r.chassis,r.color,r.emission,r.mileage+' km',(r.amount/100).toFixed(2)+' zł',r.description,r.bankCity,r.plate].filter(Boolean),listing:r.listing}:null);
    if(r.status!=='pending'&&manager&&r.companyId===me.companyId)add('vehicle',r.id,r.status,label+' · '+(r.status==='approved'?'zatwierdzono':'odrzucono'),r.decidedAt,'/firma.html#vehicleRequests');
   }
   for(const o of db.shopOrders||[]){
    if(o.category!=='lights')continue;
    const companyId=o.companyId||accounts.get(o.driver)?.companyId||MAIN_COMPANY_ID;
-   if(manager&&scope(companyId)&&o.status==='Oczekuje')add('accessory',o.id,o.status,'Wniosek o dodatki · '+o.name,o.createdAt,companyId===me.companyId?'/firma.html':'/podwykonawcy.html');
+   if(manager&&scope(companyId)&&o.status==='Oczekuje')add('accessory',o.id,o.status,'Wniosek o dodatki · '+o.name,o.createdAt,'/firma.html',{kind:'accessory',id:o.id,details:[companyName(companyId),o.driver,o.quantity+' szt.',o.price+' zł']});
    if(o.status!=='Oczekuje'&&(o.driverId?o.driverId===me.id:o.driver===name))add('accessory',o.id,o.status,o.name+' · '+o.status,o.decidedAt,'/moj-panel.html#lights');
   }
   for(const [id,license] of Object.entries(db.trailerLicenses||{})){
-   if(license.status==='pending'&&auth(req))add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+companyName(id),license.createdAt,'/podwykonawcy.html');
+   if(license.status==='pending'&&auth(req))add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+companyName(id),license.createdAt,'/podwykonawcy.html',{kind:'license',id,details:[license.reason].filter(Boolean)});
    if(license.status!=='pending'&&manager&&id===me.companyId)add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+(license.status==='approved'?'zatwierdzono':'odrzucono'),license.decidedAt,'/firma.html#trailerLicense');
   }
   const reads=db.notificationReads?.[me.id]||[];
@@ -1037,7 +1040,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const a=await body(req),me=who(req);
   const licenses=db.trailerLicenses??={};
   if(a.decision){
-   if(me.role!=='admin')return send(res,403,{error:'Licencje rozpatruje administracja.'});
+   if(!auth(req))return send(res,403,{error:'Licencje rozpatruje główny szef lub administrator.'});
    const license=Object.hasOwn(licenses,a.companyId)?licenses[a.companyId]:null;
    if(!license||license.status!=='pending')return send(res,409,{error:'Brak oczekującego wniosku.'});
    if(!['approved','rejected'].includes(a.decision))return send(res,400,{error:'Wybierz decyzję.'});
@@ -1153,7 +1156,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,201,request);
  }
  if(u.pathname==='/api/company/vehicle-requests/decide'&&method==='POST'){
-  if(who(req)?.role!=='admin')return send(res,403,{error:'Wnioski rozpatruje administracja.'});
+  if(!auth(req))return send(res,403,{error:'Wnioski rozpatruje główny szef lub administrator.'});
   const a=await body(req),request=(db.vehicleRequests||[]).find(x=>x.id===a.id);
   if(!request)return send(res,404,{error:'Nie znaleziono wniosku.'});
   if(request.status!=='pending')return send(res,409,{error:'Wniosek został już rozpatrzony.'});
