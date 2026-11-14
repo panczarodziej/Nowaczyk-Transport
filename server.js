@@ -129,6 +129,16 @@ function canAssignRoutes(req){
  return hasDispatcherRole(me)||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID);
 }
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
+function companyCashFlow(db,companyId){
+   const transactions=(db.ledger||[]).filter(x=>x.companyId===companyId).map(x=>Math.round(Number(x.amount||0)*100));
+   const income=transactions.reduce((sum,cents)=>sum+Math.max(0,cents),0);
+   const operatingCosts=(db.expenses||[]).filter(x=>{
+    const route=(db.routes||[]).find(r=>r.id===x.routeId);
+    return (x.companyId||route?.companyId||MAIN_COMPANY_ID)===companyId;
+   }).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
+   const costs=transactions.reduce((sum,cents)=>sum+Math.max(0,-cents),operatingCosts);
+ return {income,costs};
+}
 function body(req){
  return new Promise((resolve,reject)=>{
   if(req.destroyed&&!req.readableEnded)return reject(new Error('Połączenie zamknięte przed odebraniem żądania'));
@@ -160,6 +170,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&
+    !(method==='POST'&&u.pathname==='/api/fleet/buy')&&
+    !(method==='GET'&&u.pathname==='/api/fleet'&&u.searchParams.get('company')==='1')&&
     !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
     !['/api/accounts/me','/api/accounts/login','/api/accounts/password','/api/logout','/api/admin/applications','/api/companies','/api/me'].includes(u.pathname)){
@@ -344,13 +356,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   else entries=Object.entries(db.initialBudgets||{}).map(([companyId,x])=>({companyId,...x}));
   const budgets=(db.companies||[]).filter(c=>!mine||c.id===who(req).companyId).map(c=>{
    const b=entries.find(x=>x.companyId===c.id);
-   const transactions=(db.ledger||[]).filter(x=>x.companyId===c.id).map(x=>Math.round(Number(x.amount||0)*100));
-   const income=transactions.reduce((sum,cents)=>sum+Math.max(0,cents),0);
-   const operatingCosts=(db.expenses||[]).filter(x=>{
-    const route=(db.routes||[]).find(r=>r.id===x.routeId);
-    return (x.companyId||route?.companyId||MAIN_COMPANY_ID)===c.id;
-   }).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
-   const costs=transactions.reduce((sum,cents)=>sum+Math.max(0,-cents),operatingCosts);
+   const {income,costs}=companyCashFlow(db,c.id);
    return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id),locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b?b.initialCents+income-costs:null};
   });return send(res,200,budgets);
  }
@@ -667,6 +673,10 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/fleet'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const fleet=db.fleet||[];
+  if(u.searchParams.get('company')==='1'){
+   if(!auth(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Brak dostępu do floty firmy'});
+   return send(res,200,{fleet:fleet.filter(vehicle=>vehicle.companyId===me.companyId)});
+  }
   if(auth(req)&&u.searchParams.get('mine')!=='1')return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{fleet:fleet.filter(v=>v.driverAccountId===me.id&&v.companyId===me.companyId)});
  }
@@ -681,9 +691,35 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(driverAccountId&&db.fleet.some(x=>x.driverAccountId===driverAccountId&&x.id!==id))return send(res,409,{error:'Ten kierowca ma już przypisany pojazd'});
   let v=id?db.fleet.find(x=>x.id===id):null;
   if(id&&!v)return send(res,404,{error:'Nie znaleziono pojazdu'});
+  if(v?.purchasedAt&&acct&&acct.companyId!==v.companyId)return send(res,400,{error:'Wybierz kierowcę z firmy właściciela.'});
   if(!v){v={id:crypto.randomUUID()};db.fleet.push(v)}
-  Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:acct?.companyId||MAIN_COMPANY_ID});
+  Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:v.purchasedAt?v.companyId:acct?.companyId||MAIN_COMPANY_ID});
   await save(db);return send(res,200,v);
+ }
+ if(u.pathname==='/api/fleet/buy'&&method==='POST'){
+  if(!auth(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Tylko szef firmy'});
+  const me=who(req),companyId=me.companyId||MAIN_COMPANY_ID;
+  const a=await body(req),model=str(a.model,100),plate=str(a.plate,30).toUpperCase(),description=str(a.description,500);
+  if(!model||!plate||typeof a.amount!=='string'||!/^(0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(a.amount)||Number(a.amount)<=0){
+   return send(res,400,{error:'Podaj model, rejestrację i dodatnią cenę w PLN.'});
+  }
+  if(!db.companies.some(company=>company.id===companyId))return send(res,404,{error:'Nie znaleziono firmy'});
+  if((db.fleet||[]).some(vehicle=>vehicle.plate===plate))return send(res,409,{error:'Taka rejestracja już istnieje'});
+  const budget=pool
+   ?(await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId])).rows[0]?.initial_cents
+   :db.initialBudgets?.[companyId]?.initialCents;
+  const {income,costs}=companyCashFlow(db,companyId);
+  const cents=Math.round(Number(a.amount)*100);
+  if(budget==null)return send(res,409,{error:'Firma nie ma budżetu startowego.'});
+  if(Number(budget)+income-costs<cents)return send(res,409,{error:'Za mało środków na koncie firmy.'});
+  const createdAt=new Date().toISOString();
+  const vehicle={id:crypto.randomUUID(),model,plate,description,companyId,driverAccountId:'',driverUsername:'',purchasedAt:createdAt};
+  db.fleet??=[];
+  db.ledger??=[];
+  db.fleet.push(vehicle);
+  db.ledger.push({id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,type:'zakup_pojazdu',description:description||model,amount:-cents/100,createdAt});
+  await save(db);
+  return send(res,201,vehicle);
  }
  if(u.pathname==='/api/fleet/sell'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Sprzedaż jest dostępna dla głównego szefa i administratora.'});

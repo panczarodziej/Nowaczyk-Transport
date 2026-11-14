@@ -248,6 +248,17 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},login.cookie)).status,403);
  assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},dispatcher.cookie)).status,200);
  assert.equal((await req('/api/routes/export?id='+otherRoute.data.id,null,admin.cookie)).status,404);
+ const buy={model:'Scania NG',plate:'TEST 500',amount:'100.25',description:'Ciągnik',companyId:'nowaczyk'};
+ assert.equal((await req('/api/fleet/buy',buy,login.cookie)).status,403);
+ const beforePurchase=(await req('/api/budgets?mine=1',null,sub.cookie)).data[0];
+ assert.equal((await req('/api/fleet/buy',{...buy,amount:'999999999'},sub.cookie)).status,409);
+ const bought=await req('/api/fleet/buy',buy,sub.cookie);
+ assert.equal(bought.status,201);
+ assert.equal(bought.data.companyId,company.data.id);
+ assert.equal((await req('/api/fleet/buy',buy,sub.cookie)).status,409);
+ assert.equal((await req('/api/budgets?mine=1',null,sub.cookie)).data[0].balanceCents,beforePurchase.balanceCents-10025);
+ assert.ok((await req('/api/fleet?company=1',null,sub.cookie)).data.fleet.some(v=>v.id===bought.data.id));
+
  const link=await fetch(base+'/trasy.html',{headers:{Cookie:login.cookie},redirect:'manual'});
  assert.equal(link.headers.get('location'),'/moj-panel.html#routes');
  assert.equal((await req('/api/accounts/password',{currentPassword:'incorrect',newPassword:'driver-new-password'},login.cookie)).status,403);

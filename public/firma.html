@@ -45,6 +45,16 @@ button+button{margin-left:8px}
 <article><h2>Koszty</h2><strong id="costCents">—</strong></article>
 </div>
 <p id="moneyStatus" role="status"></p>
+<h2>Zakup ciągnika</h2>
+<form id="buyTruck">
+ <label>Model <input name="model" maxlength="100" placeholder="Scania NG" required></label>
+ <label>Rejestracja <input name="plate" maxlength="30" required></label>
+ <label>Cena (PLN) <input name="amount" type="number" min="0.01" max="999999999.99" step="0.01" required></label>
+ <label>Opis zakupu <input name="description" maxlength="500"></label>
+ <button>Kup i dodaj do floty</button>
+</form>
+<p id="buyStatus" role="status"></p>
+<h2>Flota firmy</h2><ul id="companyFleet"></ul>
 </section>
 <div class="grid" id="stats">
 <article><h2>Przejechane kilometry</h2><strong id="km">—</strong></article>
@@ -129,6 +139,10 @@ get('createCompany').onsubmit=event=>{
 if(partners){get('title').textContent='Podwykonawcy';get('stats').hidden=true;get('status').hidden=true}
 else{
  refresh();
+ async function loadFleet(){
+  const {fleet}=await api('/api/fleet?company=1');
+  get('companyFleet').replaceChildren(...(fleet.length?fleet.map(vehicle=>element('li',vehicle.model+' · '+vehicle.plate+(vehicle.driverUsername?' · '+vehicle.driverUsername:''))):[element('li','Brak ciągników we flocie.')]));
+ }
  async function refreshMoney(){
   try{
    const [budget]=await api('/api/budgets?mine=1');
@@ -139,9 +153,23 @@ else{
    }
    get('moneyStatus').textContent='';
   }catch(error){if(get('companyMoney').hidden)return;get('moneyStatus').textContent=error.message}
-  finally{setTimeout(refreshMoney,15000)}
+
  }
+ get('buyTruck').onsubmit=async event=>{
+  event.preventDefault();
+  const form=event.currentTarget,button=event.submitter;
+  button.disabled=true;
+  try{
+   const vehicle=await api('/api/fleet/buy','POST',Object.fromEntries(new FormData(form)));
+   form.reset();
+   get('buyStatus').textContent=vehicle.model+' dodany do floty. Koszt zapisano na koncie firmy.';
+   await Promise.all([refreshMoney(),loadFleet()]);
+  }catch(error){get('buyStatus').textContent=error.message}
+  finally{button.disabled=false}
+ };
  refreshMoney();
+ loadFleet().catch(()=>{});
+ setInterval(refreshMoney,15000);
 }
 loadCompanies().catch(error=>{get('settingsStatus').textContent=error.message});
 
