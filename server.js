@@ -1074,7 +1074,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDrive(req))return send(res,403,{error:'Brak dostępu do ustawień konta.'});
   if(!rate(req,'change-password:'+account.id,6))return send(res,429,{error:'Za dużo prób. Spróbuj za minutę.'});
   const a=await body(req),current=str(a.currentPassword,300),next=a.newPassword;
-  if(typeof next!=='string'||next.length<12||next.length>300||next!==next.trim())return send(res,400,{error:'Nowe hasło musi mieć od 12 do 300 znaków, bez spacji na początku i końcu.'});
+  if(typeof next!=='string'||next.length<6||next.length>300||next!==next.trim())return send(res,400,{error:'Nowe hasło musi mieć od 12 do 300 znaków, bez spacji na początku i końcu.'});
   const candidate=crypto.scryptSync(current,account.salt,64);
   if(!crypto.timingSafeEqual(candidate,Buffer.from(account.hash,'hex')))return send(res,403,{error:'Obecne hasło jest nieprawidłowe.'});
   const updated={...account,...passwordHash(next)};
@@ -1092,7 +1092,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/accounts'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),username=str(a.username,50),pass=str(a.password,300),role=str(a.role,40),companyId=str(a.companyId,80)||MAIN_COMPANY_ID;
-  if(!/^[a-zA-Z0-9._-]{3,50}$/.test(username)||pass.length<12||!ROLES.includes(role))return send(res,400,{error:'Login: 3–50 znaków, hasło min. 12 znaków, poprawna rola'});
+  if(!/^[a-zA-Z0-9._-]{3,50}$/.test(username)||pass.length<6||!ROLES.includes(role))return send(res,400,{error:'Login: 3–50 znaków, hasło min. 6 znaków, poprawna rola'});
   if(role==='admin'&&who(req).role!=='admin')return send(res,403,{error:'Tylko administrator może utworzyć konto administratora'});
   if(!db.companies.some(company=>company.id===companyId))return send(res,400,{error:'Wybierz istniejącą firmę.'});
   if(role==='subcontractor'&&companyId===MAIN_COMPANY_ID)return send(res,400,{error:'Wybierz firmę podwykonawcy.'});
@@ -1113,7 +1113,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!acct||acct.deletedAt)return send(res,404,{error:'Nie znaleziono konta'});
   if(who(req).role!=='admin'&&(acct.role==='admin'||a.role==='admin'))return send(res,403,{error:'Tylko administrator może zarządzać kontami administratorów'});
   if(a.active===false&&(acct.role==='admin'||acct.id===who(req).id))return send(res,400,{error:'Nie można zablokować administratora ani własnego konta'});
-  if(a.password!==undefined&&(typeof a.password!=='string'||a.password.length<12||a.password.length>300))return send(res,400,{error:'Hasło min. 12 znaków'});
+  if(a.password!==undefined&&(typeof a.password!=='string'||a.password.length<6||a.password.length>300))return send(res,400,{error:'Hasło min. 6 znaków'});
   if(a.companyId!==undefined){
    const companyId=str(a.companyId,80);
    if(!db.companies.some(company=>company.id===companyId))return send(res,400,{error:'Wybierz istniejącą firmę.'});
