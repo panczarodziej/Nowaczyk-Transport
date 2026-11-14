@@ -2,7 +2,7 @@
 (function mountTransportHeader(){
  const titles={
   'system.html':'Zarządzanie transportem','firma.html':'Moja firma','podwykonawcy.html':'Podwykonawcy',
-  'budzety.html':'Budżety firm','moj-panel.html':'Panel kierowcy','driver.html':'Panel kierowcy','gielda.html':'Giełda',
+  'wnioski.html':'Wnioski','budzety.html':'Budżety firm','moj-panel.html':'Panel kierowcy','driver.html':'Panel kierowcy','gielda.html':'Giełda',
   'centrum-floty.html':'Mapa kierowców','flota-online.html':'Flota','trasy.html':'Przydzielone trasy',
   'uzytkownicy.html':'Role pracowników','naczepy.html':'Naczepy','admin.html':'Rekrutacja',
   'ekonomia.html':'Ekonomia','dokumenty.html':'Dokumenty','spedytor.html':'Dyspozytornia'
@@ -84,6 +84,7 @@
  }
  notifications.addEventListener('toggle',()=>{if(notifications.open)updateNotifications()});
  window.addEventListener('focus',updateNotifications);
+ window.addEventListener('requests-changed',updateNotifications);
  updateNotifications();
  setInterval(updateNotifications,10000);
 })();
