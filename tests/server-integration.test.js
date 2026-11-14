@@ -282,8 +282,11 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(purchase.data.companyId,company.data.id);
  assert.equal(await budgetForSub(),beforePurchase);
  const approval={id:purchase.data.id,status:'approved'};
- assert.equal((await req(review,approval,dispatcher.cookie)).status,403);
- const approved=await req(review,approval,admin.cookie);
+ assert.equal((await req(review,approval,sub.cookie)).status,403);
+ const requestNotice=(await req('/api/notifications',null,dispatcher.cookie)).data.items.find(item=>item.review?.id===purchase.data.id);
+ assert.equal(requestNotice.review.kind,'vehicle');
+ assert.ok(requestNotice.url.startsWith('/wnioski.html#'));
+ const approved=await req(review,approval,dispatcher.cookie);
  assert.equal(approved.status,200);
  assert.equal((await req(review,approval,admin.cookie)).status,409);
  assert.equal(await budgetForSub(),beforePurchase-10025);
