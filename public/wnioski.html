@@ -38,6 +38,15 @@ function render(item){
   const link=el('a','Otwórz ogłoszenie');link.href=r.listing;link.target='_blank';link.rel='noopener noreferrer';card.append(link);
  }
  const form=document.createElement('form');
+ if(r.cash){
+  field(form,'Cena z ogłoszenia','listingPrice',15);
+  const price=form.elements.listingPrice;
+  price.type='number';price.min='0.01';price.step='0.01';
+  const label=el('label','Waluta ogłoszenia');
+  const select=document.createElement('select');select.name='listingCurrency';
+  for(const currency of ['PLN','EUR']){const option=el('option',currency);option.value=currency;select.append(option)}
+  label.append(select);form.append(label);
+ }
  if(r.lease)field(form,'Rejestracja leasingowa','plate',30);
  if(r.kind==='vehicle')field(form,'Uzasadnienie decyzji','note',500);
  for(const [value,label] of [['approve','Zatwierdź'],['reject','Odrzuć']]){
