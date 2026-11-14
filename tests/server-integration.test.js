@@ -62,9 +62,8 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  const ownerAccount={username:'kcvper',password:'budget-owner-password',role:'boss'};
  assert.equal((await req('/api/accounts',ownerAccount,admin.cookie)).status,201);
  const owner=await req('/api/accounts/login',{username:ownerAccount.username,password:ownerAccount.password});
- assert.equal((await req('/api/budgets',null,owner.cookie)).data.find(b=>b.companyId===company.data.id).canSetInitialBudget,true);
- assert.equal((await req('/api/budgets',budget,owner.cookie)).data.initialCents,50025);
- assert.equal((await req('/api/budgets',budget,owner.cookie)).status,409);
+ assert.equal((await req('/api/budgets',null,owner.cookie)).data.find(b=>b.companyId===company.data.id).canSetInitialBudget,false);
+ assert.equal((await req('/api/budgets',budget,owner.cookie)).status,403);
  const subAccount={username:'subboss',password:'subboss-password-only',role:'boss',companyId:company.data.id};
  assert.equal((await req('/api/accounts',subAccount,dispatcher.cookie)).status,201);
  const sub=await req('/api/accounts/login',{username:subAccount.username,password:subAccount.password});
@@ -264,6 +263,11 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const requests='/api/company/vehicle-requests';
  const review=requests+'/decide';
  const budgetForSub=async()=>(await req('/api/budgets?mine=1',null,sub.cookie)).data[0].balanceCents;
+ const funding='/api/company/startup-finance';
+ assert.equal((await req(funding,{source:'wallet',amount:'500.25'},sub.cookie)).status,409);
+ assert.equal((await req(funding,{source:'credit',amount:'510.25'},sub.cookie)).status,201);
+ assert.equal((await req(funding,{source:'credit',amount:'510.25'},sub.cookie)).status,409);
+ assert.equal((await req(funding,{source:'repay',amount:'10'},sub.cookie)).data.remainingCents,50025);
  const beforePurchase=await budgetForSub();
  assert.equal((await req(requests,cash,login.cookie)).status,403);
  assert.equal((await req('/api/fleet/buy',cash,sub.cookie)).status,409);
