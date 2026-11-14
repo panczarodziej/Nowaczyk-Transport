@@ -145,8 +145,7 @@ function revokeAccountSessions(db,id){
 }
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
 function canSetInitialBudget(req,companyId){
- const me=who(req);
- return auth(req)&&(companyId===MAIN_COMPANY_ID||me.username.toLowerCase()==='kcvper');
+ return auth(req)&&companyId===MAIN_COMPANY_ID;
 }
 function isSubcontractorBoss(req){const me=who(req);return me?.role==='subcontractor'||(me?.role==='boss'&&me.companyId!==MAIN_COMPANY_ID)}
 function hasDispatcherRole(account){
@@ -234,7 +233,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !['/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !['/api/company/startup-finance','/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
     !['/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
@@ -416,16 +415,48 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(pool){const q=await pool.query('SELECT company_id,initial_cents,locked_at FROM ks_company_budget');entries=q.rows.map(x=>({companyId:x.company_id,initialCents:Number(x.initial_cents),lockedAt:x.locked_at}))}
   else entries=Object.entries(db.initialBudgets||{}).map(([companyId,x])=>({companyId,...x}));
   const budgets=(db.companies||[]).filter(c=>!mine||c.id===who(req).companyId).map(c=>{
-   const b=entries.find(x=>x.companyId===c.id);
+   const funding=db.startupFinance?.[c.id];
+   const b=entries.find(x=>x.companyId===c.id)||funding;
    const {income,costs}=companyCashFlow(db,c.id);
-   return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id),locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b?b.initialCents+income-costs:null};
+   return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id),fundingSource:funding?.source,loanRemainingCents:funding?.remainingCents??0,locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b?b.initialCents+income-costs:null};
   });return send(res,200,budgets);
+ }
+ if(u.pathname==='/api/company/startup-finance'&&method==='POST'){
+  if(!isSubcontractorBoss(req))return send(res,403,{error:'Finansowanie uruchamia szef podwykonawcy.'});
+  const me=who(req),companyId=me.companyId,a=await body(req),cents=priceCents(a.amount);
+  if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Nie znaleziono firmy.'});
+  if(!cents)return send(res,400,{error:'Podaj dodatnią kwotę w PLN.'});
+  const current=db.startupFinance?.[companyId];
+  const now=new Date().toISOString();
+  if(a.source==='repay'){
+   if(current?.source!=='credit'||cents>current.remainingCents)return send(res,400,{error:'Kwota przekracza pozostały kredyt.'});
+   const {income,costs}=companyCashFlow(db,companyId);
+   if(current.initialCents+income-costs<cents)return send(res,409,{error:'Za mało środków na koncie firmy.'});
+   current.remainingCents-=cents;
+   (db.ledger??=[]).push({id:crypto.randomUUID(),companyId,type:'spłata kredytu',amount:-cents/100,createdAt:now});
+   await save(db);return send(res,200,current);
+  }
+  if(!['wallet','credit'].includes(a.source))return send(res,400,{error:'Wybierz źródło finansowania.'});
+  const legacy=pool?(await pool.query('SELECT 1 FROM ks_company_budget WHERE company_id=$1',[companyId])).rowCount:
+   Object.hasOwn(db.initialBudgets||{},companyId);
+  if(current||legacy)return send(res,409,{error:'Firma ma już finansowanie startowe.'});
+  const driver=me.username.toLowerCase();
+  if(a.source==='wallet'){
+   const wallet=Math.round((db.wallets?.[driver]||0)*100);
+   if(cents>wallet)return send(res,409,{error:'Za mało środków w portfelu kierowcy.'});
+   db.wallets[driver]=(wallet-cents)/100;
+   (db.startupTransfers??=[]).push({id:crypto.randomUUID(),driverId:me.id,driver,companyId,
+    type:'wkład do firmy',description:'Finansowanie startowe firmy',amount:-cents/100,createdAt:now});
+  }else if(cents>50000000)return send(res,400,{error:'Kredyt startowy może wynieść maksymalnie 500 000 zł.'});
+  const funding={source:a.source,initialCents:cents,remainingCents:a.source==='credit'?cents:0,lockedAt:now};
+  Object.defineProperty(db.startupFinance??={},companyId,{value:funding,enumerable:true,writable:true,configurable:true});
+  await save(db);return send(res,201,funding);
  }
  if(u.pathname==='/api/budgets'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),companyId=str(a.companyId,80),amount=a.amount;
   if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Nie znaleziono firmy'});
-  if(!canSetInitialBudget(req,companyId))return send(res,403,{error:'Budżet startowy podwykonawcy może nadać tylko kcvper.'});
+  if(!canSetInitialBudget(req,companyId))return send(res,403,{error:'Podwykonawca finansuje start z portfela lub kredytu firmowego.'});
   if(typeof amount!=='string'||! /^(0|[1-9]\d{0,11})(?:\.\d{1,2})?$/.test(amount))return send(res,400,{error:'Wpisz poprawną kwotę w PLN (maks. 2 miejsca po przecinku)'});
   const [whole,frac='']=amount.split('.');const cents=Number(whole)*100+Number(frac.padEnd(2,'0'));
   if(!Number.isSafeInteger(cents)||a.confirm!==true)return send(res,400,{error:'Potwierdź nieodwracalne ustawienie kwoty'});
@@ -444,7 +475,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const admin=auth(req)&&u.searchParams.get('mine')!=='1',name=me.username.toLowerCase();
   const wallets=db.wallets||{},orders=db.shopOrders||[],payments=db.payments||[],rates=db.driverRates||{};
-  const history=[...payments.map(p=>({id:p.id,driver:p.driver,type:'wypłata',description:'Wypłata za '+p.month,amount:Number(p.amount),createdAt:p.createdAt,bonus:Number(p.bonus||0),deduction:Number(p.deduction||0)})),...orders.filter(o=>o.status==='Zatwierdzone'&&o.category!=='lights').map(o=>({id:o.id,driver:o.driver,type:'zakup',description:o.name,amount:-Number(o.price),createdAt:o.decidedAt||o.createdAt})),...(db.fines||[]).map(f=>({id:f.id,driver:f.driver,type:'mandat',description:f.reason,amount:-Number(f.amount),createdAt:f.createdAt}))].filter(x=>admin||x.driver===name).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const history=[...(db.startupTransfers||[]).filter(x=>admin||x.driverId===me.id),...payments.map(p=>({id:p.id,driver:p.driver,type:'wypłata',description:'Wypłata za '+p.month,amount:Number(p.amount),createdAt:p.createdAt,bonus:Number(p.bonus||0),deduction:Number(p.deduction||0)})),...orders.filter(o=>o.status==='Zatwierdzone'&&o.category!=='lights').map(o=>({id:o.id,driver:o.driver,type:'zakup',description:o.name,amount:-Number(o.price),createdAt:o.decidedAt||o.createdAt})),...(db.fines||[]).map(f=>({id:f.id,driver:f.driver,type:'mandat',description:f.reason,amount:-Number(f.amount),createdAt:f.createdAt}))].filter(x=>admin||x.driver===name).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
 
   return send(res,200,{wallets:admin?wallets:{[name]:wallets[name]||0},orders:admin?orders:orders.filter(x=>x.driver===name),payments:admin?payments:payments.filter(x=>x.driver===name),rates:admin?rates:{[name]:rates[name]??0.7},items:db.shopItems||[],history,earnings:(db.routes||[]).filter(r=>r.settledAt&&(admin||r.driver.toLowerCase()===name)).map(r=>({id:r.id,driver:r.driver,km:r.drivenKm,rate:r.payRate??0.7,earned:Math.round(r.drivenKm*(r.payRate??0.7)*100)/100,settledAt:r.settledAt}))});
  }
@@ -1026,9 +1057,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const plate=financing==='lease'?str(a.plate,30).toUpperCase():request.plate;
    if(!plate)return send(res,400,{error:'Wpisz rejestrację z miasta banku lub leasingodawcy.'});
    if([...(db.fleet||[]),...(db.trailers||[])].some(x=>x.plate===plate))return send(res,409,{error:'Ta rejestracja jest już we flocie.'});
-   const budget=pool
+   const budget=db.startupFinance?.[companyId]?.initialCents??(pool
     ?(await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId])).rows[0]?.initial_cents
-    :db.initialBudgets?.[companyId]?.initialCents;
+    :db.initialBudgets?.[companyId]?.initialCents);
    const {income,costs}=companyCashFlow(db,companyId);
    if(budget==null||Number(budget)+income-costs<downPayment)return send(res,409,{error:'Firma nie ma budżetu startowego lub wystarczających środków.'});
    const vehicle={id:crypto.randomUUID(),requestId:request.id,model,plate,description,brand:request.brand,chassis:request.chassis,
