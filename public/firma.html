@@ -44,6 +44,13 @@ button+button{margin-left:8px}
  <label>Identyfikator firmy <input name="id" maxlength="80"></label>
  <button>Utwórz firmę</button>
 </form>
+<section id="partnerMileage" hidden>
+<h2>Kilometry podwykonawców</h2>
+<p>Przebieg naliczony z tras w systemie. Zakończone kilometry i wszystkie przejechane kilometry pokazane osobno.</p>
+<div class="grid"><article><h2>Łącznie km</h2><strong id="partnerKmTotal">—</strong></article><article><h2>Zakończone trasy</h2><strong id="partnerRoutesTotal">—</strong></article></div>
+<div id="partnerMileageRows"></div><p id="partnerMileageStatus" role="status"></p>
+<button id="partnerMileageRefresh" type="button">Odśwież kilometry</button>
+</section>
 <div id="companySettings"></div>
 <div id="ownManagement"></div>
 <p id="status" role="status">Pobieranie danych…</p>
@@ -371,6 +378,24 @@ else{
 }
 loadCompanies().then(()=>{if(location.hash==='#trailerLicense'||location.hash==='#companyDrivers')get(location.hash.slice(1))?.scrollIntoView()}).catch(error=>{get('settingsStatus').textContent=error.message});
 
+</script>
+<script>
+(async()=>{
+ const section=document.getElementById('partnerMileage'),status=document.getElementById('partnerMileageStatus');
+ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ async function refresh(){
+  const r=await fetch('/api/admin/subcontractor-mileage',{credentials:'same-origin'});
+  if(r.status===403||r.status===401){section.hidden=true;return}
+  if(!r.ok)throw Error('Nie udało się pobrać kilometrów podwykonawców');
+  const d=await r.json();section.hidden=false;
+  document.getElementById('partnerKmTotal').textContent=d.totals.km.toLocaleString('pl-PL')+' km';
+  document.getElementById('partnerRoutesTotal').textContent=d.totals.completedRoutes;
+  document.getElementById('partnerMileageRows').innerHTML=d.items.length?d.items.map(x=>'<article style="margin:12px 0"><h3>'+esc(x.companyName)+'</h3><p><strong>'+esc(x.km.toLocaleString('pl-PL'))+' km</strong> · zakończone: '+esc(x.completedKm.toLocaleString('pl-PL'))+' km · trasy: '+esc(x.completedRoutes)+' / '+esc(x.allRoutes)+'</p><details><summary>Kilometry kierowców</summary>'+(x.drivers.length?'<ul>'+x.drivers.map(v=>'<li>'+esc(v.driver)+': '+esc(v.km.toLocaleString('pl-PL'))+' km ('+esc(v.completedRoutes)+' ukończonych)</li>').join('')+'</ul>':'Brak tras')+'</details></article>').join(''):'<p>Brak podwykonawców.</p>';
+  status.textContent='Dane aktualne na moment odświeżenia';
+ }
+ document.getElementById('partnerMileageRefresh').onclick=()=>refresh().catch(e=>status.textContent=e.message);
+ refresh().catch(e=>status.textContent=e.message);
+})();
 </script>
 </body>
 </html>
