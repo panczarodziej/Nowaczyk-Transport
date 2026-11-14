@@ -146,7 +146,7 @@ function revokeAccountSessions(db,id){
 }
 function auth(req){const me=who(req);return me?.role==='admin'||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID)}
 function canSetInitialBudget(req,companyId){
- return auth(req)&&companyId===MAIN_COMPANY_ID;
+ return auth(req);
 }
 function isSubcontractorBoss(req){const me=who(req);return me?.role==='subcontractor'||(me?.role==='boss'&&me.companyId!==MAIN_COMPANY_ID)}
 function hasDispatcherRole(account){
@@ -526,7 +526,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const funding=db.startupFinance?.[c.id];
    const b=entries.find(x=>x.companyId===c.id)||funding;
    const {income,costs}=companyCashFlow(db,c.id);
-   return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id),fundingSource:funding?.source,loanRemainingCents:db.companyLoans?.[c.id]?.remainingCents??funding?.remainingCents??0,locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b||db.companyLoans?.[c.id]?(b?.initialCents??0)+income-costs:null};
+   return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id)&&!b,fundingSource:funding?.source,loanRemainingCents:db.companyLoans?.[c.id]?.remainingCents??funding?.remainingCents??0,locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b||db.companyLoans?.[c.id]?(b?.initialCents??0)+income-costs:null};
   });return send(res,200,budgets);
  }
  if(u.pathname==='/api/company/loan'&&method==='POST'){
@@ -585,7 +585,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),companyId=str(a.companyId,80),amount=a.amount;
   if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Nie znaleziono firmy'});
-  if(!canSetInitialBudget(req,companyId))return send(res,403,{error:'Podwykonawca finansuje start z portfela lub kredytu firmowego.'});
+  if(!canSetInitialBudget(req,companyId))return send(res,403,{error:'Brak uprawnień do ustawienia budżetu.'});
+  if(db.startupFinance?.[companyId])return send(res,409,{error:'Firma ma już finansowanie początkowe. Nie można ustawić drugiego budżetu.'});
   if(typeof amount!=='string'||! /^(0|[1-9]\d{0,11})(?:\.\d{1,2})?$/.test(amount))return send(res,400,{error:'Wpisz poprawną kwotę w PLN (maks. 2 miejsca po przecinku)'});
   const [whole,frac='']=amount.split('.');const cents=Number(whole)*100+Number(frac.padEnd(2,'0'));
   if(!Number.isSafeInteger(cents)||a.confirm!==true)return send(res,400,{error:'Potwierdź nieodwracalne ustawienie kwoty'});
