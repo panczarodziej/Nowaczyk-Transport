@@ -1107,12 +1107,25 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const license=Object.hasOwn(licenses,a.companyId)?licenses[a.companyId]:null;
    if(!license||license.status!=='pending')return send(res,409,{error:'Brak oczekującego wniosku.'});
    if(!['approved','rejected'].includes(a.decision))return send(res,400,{error:'Wybierz decyzję.'});
+   if(a.decision==='approved'){
+    const companyId=a.companyId;
+    if(!db.companies.some(c=>c.id===companyId)||companyId===MAIN_COMPANY_ID)return send(res,400,{error:'Wybierz firmę podwykonawcy.'});
+    const budget=db.startupFinance?.[companyId]?.initialCents??(pool
+     ?(await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId])).rows[0]?.initial_cents
+     :db.initialBudgets?.[companyId]?.initialCents);
+    const {income,costs}=companyCashFlow(db,companyId);
+    if(budget==null||Number(budget)+income-costs<17000000)return send(res,409,{error:'Firma nie ma wystarczających środków na licencję (170 000 zł).'});
+    (db.ledger??=[]).push({id:crypto.randomUUID(),companyId,type:'licencja_naczepy',
+     description:'Licencja na własne naczepy · opłata jednorazowa',amount:-170000,createdAt:new Date().toISOString(),licenseId:license.id});
+    license.paidAmount=170000;
+    license.paidAt=new Date().toISOString();
+   }
    Object.assign(license,{status:a.decision,decidedBy:me.username,decidedAt:new Date().toISOString()});
    await save(db);return send(res,200,license);
   }
   const previous=Object.hasOwn(licenses,me.companyId)?licenses[me.companyId]:null;
   if(previous&&previous.status!=='rejected')return send(res,409,{error:'Firma ma już licencję albo oczekujący wniosek.'});
-  const license={status:'pending',reason:str(a.reason,500),submittedBy:me.username,createdAt:new Date().toISOString()};
+  const license={id:crypto.randomUUID(),status:'pending',price:170000,reason:str(a.reason,500),submittedBy:me.username,createdAt:new Date().toISOString()};
   Object.defineProperty(licenses,me.companyId,{value:license,enumerable:true,writable:true,configurable:true});
   await save(db);return send(res,201,license);
  }

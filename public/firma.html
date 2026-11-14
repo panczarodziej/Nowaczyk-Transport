@@ -220,8 +220,9 @@ function renderManagement(card,company,data,user){
   const heading=element('h3','Licencja na własne naczepy');
   if(!partners)heading.id='trailerLicense';
   const license=data.trailerLicense;
-  card.append(heading,element('p',license?({pending:'Oczekuje na decyzję',approved:'Zatwierdzona',rejected:'Odrzucona'}[license.status]):'Brak licencji.'));
+  card.append(heading,element('p','Cena licencji: 170 000 zł (jednorazowo, pobierane z konta firmy po zatwierdzeniu).'),element('p',license?({pending:'Oczekuje na decyzję',approved:'Zatwierdzona',rejected:'Odrzucona'}[license.status]):'Brak licencji.'));
   if(license?.reason)card.append(element('p',license.reason));
+  if(license?.paidAt)card.append(element('p','Opłacono 170 000 zł · '+new Date(license.paidAt).toLocaleDateString('pl-PL')));
   if(!partners&&(!license||license.status==='rejected')){
    const {form,button}=managementForm('Złóż wniosek o licencję',values=>api('/api/company/trailer-license','POST',values));
    formField(form,'Uzasadnienie','reason',{maxLength:500,required:false});form.append(button);card.append(form);
