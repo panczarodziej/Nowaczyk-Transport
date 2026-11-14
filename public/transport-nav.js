@@ -14,12 +14,12 @@
   ['/centrum-floty.html','Mapa kierowców'],['/flota-online.html','Flota'],['/dokumenty.html','Dokumenty'],
   ['/admin.html','Rekrutacja'],['/firma.html','Moja firma'],['/podwykonawcy.html','Podwykonawcy'],
   ['/uzytkownicy.html','Role pracowników'],['/naczepy.html','Naczepy'],['/budzety.html','Budżety firm'],
-  ['/ekonomia.html','Ekonomia'],['/moj-panel.html','Panel kierowcy']
+  ['/ekonomia.html','Ekonomia'],['/moj-panel.html','Panel kierowcy'],['/telemetry.html','Aplikacja Windows']
  ]:partner?[
   ['/firma.html','Moja firma'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],
   ['/centrum-floty.html','Mapa kierowców'],['/flota-online.html','Flota'],['/naczepy.html','Naczepy'],
   ['/dokumenty.html','Dokumenty'],['/admin.html','Rekrutacja'],['/ekonomia.html','Ekonomia'],
-  ['/firma.html#companyDrivers','Kierowcy'],['/moj-panel.html#settings','Ustawienia konta'],['/moj-panel.html','Panel kierowcy']
+  ['/firma.html#companyDrivers','Kierowcy'],['/moj-panel.html#settings','Ustawienia konta'],['/moj-panel.html','Panel kierowcy'],['/telemetry.html','Aplikacja Windows']
  ]:[
   ...(user.dispatchAccess?[['/moj-panel.html','Mój panel']]:[]),['/spedytor.html','Dyspozytor'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],['/centrum-floty.html','Mapa kierowców']
  ];
