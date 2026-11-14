@@ -24,10 +24,37 @@ let win,tray;
 const file=()=>path.join(app.getPath('userData'),'settings.json');
 function settings(){try{const saved=JSON.parse(fs.readFileSync(file(),'utf8'));if(saved.server==='https://nowaczyk-transport.onrender.com')saved.server='https://nowaczyk-transport-6kth.onrender.com';return saved}catch{return {etsPath:'',server:'https://nowaczyk-transport-6kth.onrender.com',autostart:false,startMinimized:false,autoSync:true}}}
 function save(x){const old=settings();const next={...old,etsPath:String(x.etsPath||''),server:String(x.server||'https://nowaczyk-transport-6kth.onrender.com'),autostart:!!x.autostart,startMinimized:!!x.startMinimized,autoSync:!!x.autoSync};if(!/^https?:\/\//.test(next.server))throw Error('Adres serwera musi zaczynać się od http:// lub https://');fs.writeFileSync(file(),JSON.stringify(next,null,2));app.setLoginItemSettings({openAtLogin:next.autostart,args:next.startMinimized?['--minimized']:[]});return next}
+function validEtsFolder(folder){
+ return Boolean(folder&&fs.existsSync(path.join(folder,'bin','win_x64','eurotrucks2.exe')));
+}
+function initializeEtsFolder(){
+ const current=settings();
+ if(validEtsFolder(current.etsPath))return;
+ const detected=detectEts();
+ if(detected)fs.writeFileSync(file(),JSON.stringify({...current,etsPath:detected},null,2));
+}
 function detectEts(){
  const roots=[process.env['PROGRAMFILES(X86)'],process.env.PROGRAMFILES,'C:\\Program Files (x86)','C:\\Program Files'].filter(Boolean);
- const candidates=roots.map(r=>path.join(r,'Steam','steamapps','common','Euro Truck Simulator 2'));
- return candidates.find(p=>fs.existsSync(path.join(p,'bin','win_x64','eurotrucks2.exe')))||'';
+ const steamRoots=roots.map(root=>path.join(root,'Steam'));
+ if(process.platform==='win32'){
+  try{
+   const output=cp.execFileSync('reg',['query','HKCU\\Software\\Valve\\Steam','/v','SteamPath'],{windowsHide:true,timeout:2000,encoding:'utf8'});
+   const steamPath=output.match(/SteamPath\s+REG_SZ\s+([^\r\n]+)/i)?.[1]?.trim();
+   if(steamPath)steamRoots.unshift(steamPath);
+  }catch{}
+ }
+ const libraries=new Set(steamRoots);
+ for(const root of new Set(steamRoots)){
+  try{
+   const vdf=fs.readFileSync(path.join(root,'steamapps','libraryfolders.vdf'),'utf8');
+   for(const match of vdf.matchAll(/"path"\s+"([^"]+)"/g))libraries.add(match[1].replace(/\\\\/g,'\\'));
+  }catch{}
+ }
+ for(const library of libraries){
+  const game=path.join(library,'steamapps','common','Euro Truck Simulator 2');
+  if(validEtsFolder(game))return game;
+ }
+ return '';
 }
 function pluginStatus(etsPath){
  const target=path.join(etsPath||'', 'bin','win_x64','plugins','scs-telemetry.dll');
@@ -196,6 +223,7 @@ app.whenReady().then(()=>{
   autoDispatchMessage='';
  });
  setInterval(()=>void autoDispatch(),15000);
+ try{initializeEtsFolder()}catch(error){console.error("Wykrywanie ETS2:",error.message)}
  restoreEvents();startBridge();startReader();setInterval(()=>{if(!readerProcess)startReader()},10000);ipcMain.handle('desktop-login',(_,credentials)=>loginDesktop(credentials));ipcMain.handle('accept-driver-route',async(_,id)=>{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))return {ok:false,error:'Nieprawidłowe ID'};return driverRequest('/api/routes/accept',{method:'POST',body:JSON.stringify({routeId:id})})});ipcMain.handle('import-driver-route',async(_,id)=>{try{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))throw Error('Nieprawidłowe ID');const job=await driverRequest('/api/routes/export?id='+encodeURIComponent(id));if(!job.ok)return job;if(!job.acceptedAt)return {ok:false,error:'Najpierw przyjmij trasę w aplikacji'};const picked=await dialog.showOpenDialog(win,{title:'Wybierz zapis game.sii z profilu ETS2 (menu profili)',properties:['openFile'],filters:[{name:'Zapis ETS2',extensions:['sii']}]});if(picked.canceled)return {ok:false,error:'Anulowano'};const importer=require('./save-importer');const ramps={source:importer.loadingPoint(job.from)};
  const r=importer.importFile(picked.filePaths[0],job,ramps);return {ok:true,...r}}catch(e){return {ok:false,error:e.message}}});ipcMain.handle('open-driver-panel',()=>openDriverPanel());ipcMain.handle('driver-status',async()=>{const r=await driverRequest('/api/accounts/me');captureDriver=r.user?.username?.toLowerCase()||null;return {...r,desktopReady:!!desktopAuth&&desktopAuth.origin===baseUrl()&&desktopAuth.username.toLowerCase()===captureDriver}});ipcMain.handle('map-profile-get',()=>driverRequest('/api/driver/map-profile'));ipcMain.handle('map-profile-set',async(_,mapProfile)=>{if(!['promods','promods-pr'].includes(mapProfile))return {ok:false,error:'Nieprawidłowy profil'};return driverRequest('/api/driver/map-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mapProfile})})});ipcMain.handle('driver-routes',listDriverRoutes);ipcMain.handle('export-driver-route',async(_,id)=>{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))return {ok:false,error:'Nieprawidłowe ID zlecenia'};const result=await driverRequest('/api/routes/export?id='+encodeURIComponent(id));if(!result.ok)return result;const destination=await dialog.showSaveDialog(win,{title:'Zapisz manifest zlecenia Nowaczyk Transport',defaultPath:'ks-job-'+id+'.json',filters:[{name:'JSON',extensions:['json']}]});if(destination.canceled||!destination.filePath)return {ok:false,error:'Anulowano'};fs.writeFileSync(destination.filePath,JSON.stringify(result,null,2),'utf8');return {ok:true,path:destination.filePath};});ipcMain.handle('sync-telemetry',()=>syncTelemetry());ipcMain.handle('sync-info',()=>({...syncInfo,readerError}));setInterval(()=>{if(settings().autoSync)syncTelemetry().catch(e=>{syncInfo={ok:false,error:e.message,at:new Date().toISOString()}})},5000);ipcMain.handle('plugin-status',(_,p)=>pluginStatus(p));ipcMain.handle('install-plugin',(_,p)=>installPlugin(p));ipcMain.handle('telemetry-status',()=>lastTelemetry?{...lastTelemetry,ageMs:Date.now()-lastTelemetry.receivedAt}:null);ipcMain.handle('get-settings',()=>({...settings(),appVersion:app.getVersion()}));ipcMain.handle('save-settings',async(_,x)=>{
  const saved=save({...x,etsPath:x.etsPath||detectEts()});
