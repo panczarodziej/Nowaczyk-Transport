@@ -84,7 +84,7 @@ button+button{margin-left:8px}
 <article><h2>Wypłaty kierowców</h2><strong id="driverPayments">—</strong></article>
 <article><h2>Do wypłaty za kursy</h2><strong id="pendingDriverPay">—</strong></article>
 <article><h2>Otwarte zlecenia</h2><strong id="openRoutes">—</strong></article>
-<article><h2>Kierowcy online</h2><strong id="online">—</strong></article>
+<article><h2>Kierowcy online</h2><strong id="online">—</strong><p id="onlineScope" class="muted"></p></article>
 <article><h2>Pojazdy w firmie</h2><strong id="vehicles">—</strong></article>
 </div>
 </main>
@@ -98,7 +98,8 @@ async function refresh(){
   const data=await response.json();
   for(const key of fields)document.getElementById(key).textContent=(data[key]??(key==='deliveries'?data.completedRoutes:null))?.toLocaleString('pl-PL')??'—';
   document.getElementById('km').textContent=data.km.toLocaleString('pl-PL')+' km';
-  document.getElementById('online').textContent=data.online+' / '+data.drivers;
+  document.getElementById('online').textContent=(data.allOnline??data.online)+' / '+(data.allDrivers??data.drivers);
+  document.getElementById('onlineScope').textContent=data.allDrivers==null?'Telemetria własnej firmy':'Wszystkie firmy · Twoja firma: '+data.online+' / '+data.drivers;
   for(const key of ['revenue','driverPayments','pendingDriverPay'])document.getElementById(key).textContent=data[key]?.toLocaleString('pl-PL',{style:'currency',currency:'PLN'})??'—';
   status.textContent='Dane z zapisanych zleceń i bieżącej telemetrii.';
  }catch(error){status.textContent=error.message}

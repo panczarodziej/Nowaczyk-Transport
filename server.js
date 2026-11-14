@@ -131,6 +131,22 @@ function canAssignRoutes(req){
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
 function companyManager(req){return auth(req)||isSubcontractorBoss(req)}
 function employee(account){return !account.deletedAt&&['driver','probation'].includes(account.role)}
+function drivingRoster(db){
+ const assigned=new Set((db.fleet||[]).map(v=>v.driverAccountId));
+ const routed=new Set((db.routes||[]).map(r=>r.companyId+':'+r.driver?.toLowerCase()));
+ return [...accounts.values()].filter(a=>{
+  if(!a.active||a.deletedAt)return false;
+  if(employee(a))return true;
+  if(!['admin','boss'].includes(a.role)||a.companyId!==MAIN_COMPANY_ID)return false;
+  const name=a.username.toLowerCase();
+  return assigned.has(a.id)||routed.has(a.companyId+':'+name)||db.fleetPositions?.[name]?.companyId===a.companyId;
+ });
+}
+function driverOnline(db,account,now){
+ const position=db.fleetPositions?.[account.username.toLowerCase()];
+ const age=now-Date.parse(position?.updatedAt);
+ return position?.companyId===account.companyId&&age>=0&&age<45000;
+}
 function expenseCompany(db,expense){
  return expense.companyId||(db.routes||[]).find(route=>route.id===expense.routeId)?.companyId||MAIN_COMPANY_ID;
 }
@@ -246,18 +262,16 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const completed=routes.filter(route=>route.settledAt||route.deliveredAt||route.status==='Zakończona');
   const earned=roundPLN(routes.filter(route=>route.settledAt).reduce((sum,route)=>sum+Number(route.freight||0),0));
   const paid=roundPLN((db.payments||[]).filter(p=>routes.some(r=>r.driver.toLowerCase()===p.driver)).reduce((sum,p)=>sum+Number(p.amount||0),0));
-  const drivers=[...accounts.values()].filter(account=>account.active&&account.companyId===companyId&&['driver','probation'].includes(account.role));
-  const now=Date.now();
+  const roster=drivingRoster(db),now=Date.now();
+  const drivers=roster.filter(account=>account.companyId===companyId);
+  const online=drivers.filter(account=>driverOnline(db,account,now)).length;
   if(isSubcontractorBoss(req))return send(res,200,{
    companyName:db.companies.find(company=>company.id===companyId)?.name||companyId,
    km:Math.round(routes.reduce((sum,route)=>sum+(Number(route.drivenKm)||0),0)*10)/10,
    completedRoutes:completed.length,
    openRoutes:routes.length-completed.length,
    drivers:drivers.length,
-   online:drivers.filter(account=>{
-    const position=db.fleetPositions?.[account.username.toLowerCase()];
-    return position?.companyId===companyId&&now-Date.parse(position.updatedAt)<45000;
-   }).length
+   online
   });
   return send(res,200,{
    km:Math.round(routes.reduce((sum,route)=>sum+(Number(route.drivenKm)||0),0)*10)/10,
@@ -268,7 +282,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    pendingDriverPay:roundPLN(routes.filter(r=>r.settledAt).reduce((sum,r)=>sum+Number(r.drivenKm||0)*Number(r.payRate??0.7),0)- (db.payments||[]).filter(p=>routes.some(r=>r.driver.toLowerCase()===p.driver)).reduce((sum,p)=>sum+Number(p.base||0),0)),
    openRoutes:routes.filter(route=>!route.deliveredAt&&route.status!=='Zakończona').length,
    drivers:drivers.length,
-   online:drivers.filter(account=>now-Date.parse(db.fleetPositions?.[account.username.toLowerCase()]?.updatedAt)<45000).length,
+   online,
+   ...(auth(req)?{allDrivers:roster.length,allOnline:roster.filter(account=>driverOnline(db,account,now)).length}:{}),
    vehicles:(db.fleet||[]).filter(vehicle=>vehicle.companyId===companyId).length
   });
  }
