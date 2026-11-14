@@ -1,6 +1,7 @@
 'use strict';
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {validateJob,jobIdentityReasons}=require('./job-match');
+const fleetFinance=require('./fleet-finance');
 const PORT=Number(process.env.PORT||3000),ROOT=path.join(__dirname,'public'),DB=process.env.DATA_FILE||path.join(__dirname,'data.json');
 const password=process.env.ADMIN_PASSWORD;
 if(!password || password.length<12){console.error('Ustaw ADMIN_PASSWORD (min. 12 znaków) przed startem.');process.exit(1)}
@@ -253,11 +254,12 @@ const mime={'.html':'text/html; charset=utf-8','.js':'application/javascript','.
 let mutationTail=Promise.resolve();
 const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].includes(req.method)){const previous=mutationTail;mutationTail=new Promise(resolve=>{release=resolve});await previous}try{
  const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();
- const key=sessionKey(req);
+ if(u.pathname.startsWith('/api/fleet-finance/')&&pool){const budgets=await pool.query('SELECT company_id,initial_cents FROM ks_company_budget');db.initialBudgets=Object.fromEntries(budgets.rows.map(x=>[x.company_id,{initialCents:Number(x.initial_cents)}]))}
+  const key=sessionKey(req);
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !['/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
     !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
@@ -267,6 +269,30 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,403,{error:'Konto szefa podwykonawcy ma dostęp do rekrutacji i mapy własnej firmy.'});
  }
 
+ if(u.pathname.startsWith('/api/fleet-finance/')){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
+  const me=who(req),companyId=auth(req)&&u.searchParams.get('companyId')||me.companyId;
+  if(companyId!==me.companyId&&!auth(req))return send(res,403,{error:'Brak dostępu'});
+  if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Brak firmy'});
+  if(method==='GET'&&u.pathname==='/api/fleet-finance/overview')return send(res,200,{
+   leases:(db.fleetLeases||[]).filter(x=>x.companyId===companyId),
+   policies:(db.fleetPolicies||[]).filter(x=>x.companyId===companyId),
+   tolls:(db.fleetTolls||[]).filter(x=>x.companyId===companyId),
+   notices:fleetFinance.notices(db,companyId)
+  });
+  if(method==='POST'){
+   const a=await body(req);
+   try{
+    let result;
+    if(u.pathname==='/api/fleet-finance/lease')result=fleetFinance.createLease(db,companyId,a);
+    else if(u.pathname==='/api/fleet-finance/policy')result=fleetFinance.createPolicy(db,companyId,a);
+    else if(u.pathname==='/api/fleet-finance/toll')result=fleetFinance.createToll(db,companyId,a);
+    else return send(res,404,{error:'Nie znaleziono'});
+    await save(db);return send(res,201,result);
+   }catch(error){return send(res,400,{error:error.message})}
+  }
+  return send(res,405,{error:'Metoda niedozwolona'});
+ }
  if(u.pathname==='/api/my-applications'&&method==='GET'){
   const me=who(req);
   if(!me)return send(res,401,{error:'Zaloguj się.'});
@@ -307,6 +333,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(license.status==='pending'&&auth(req))add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+companyName(id),license.createdAt,'/podwykonawcy.html',{kind:'license',id,details:[license.reason].filter(Boolean)});
    if(license.status!=='pending'&&manager&&id===me.companyId)add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+(license.status==='approved'?'zatwierdzono':'odrzucono'),license.decidedAt,'/firma.html#trailerLicense');
   }
+  if(manager)for(const n of fleetFinance.notices(db,me.companyId))rows.push({id:'finance:'+n.id,label:n.label+' · '+n.due,at:n.at,url:n.url});
   const reads=db.notificationReads?.[me.id]||[];
   if(method==='POST'){
    const a=await body(req);
@@ -1392,7 +1419,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   res.writeHead(302,{Location:homePath,'Cache-Control':'no-store'});return res.end();
  }
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:homePath});return res.end()}
- if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/firma.html','/budzety.html','/ekonomia.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(['/flota-online.html','/firma.html'].includes(u.pathname)&&!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)&&!isSubcontractorBoss(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
+ if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/firma.html','/budzety.html','/ekonomia.html','/finanse-floty.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/finanse-floty.html'&&!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(['/flota-online.html','/firma.html'].includes(u.pathname)&&!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)&&!isSubcontractorBoss(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);
  if(file==='podwykonawcy.html'){
   if(!auth(req))return send(res,403,{error:'Tylko główny szef lub administrator'});
@@ -1409,4 +1436,5 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const policy=basePolicy+(file==='centrum-floty.html'?fleetMapPolicy:'');
  res.writeHead(200,{'Content-Type':mime[path.extname(full)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Content-Security-Policy':policy});fs.createReadStream(full).pipe(res);
 }catch(e){if(res.destroyed)return;console.error(e);if(!res.headersSent)send(res,500,{error:'Błąd serwera'})}finally{release?.()}});
-initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT))).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
+async function financeTick(){const previous=mutationTail;let release;mutationTail=new Promise(resolve=>{release=resolve});await previous;try{const db=await load();if(pool){const budgets=await pool.query('SELECT company_id,initial_cents FROM ks_company_budget');db.initialBudgets=Object.fromEntries(budgets.rows.map(x=>[x.company_id,{initialCents:Number(x.initial_cents)}]))}if(fleetFinance.processDue(db))await save(db)}catch(error){console.error('Finanse floty:',error)}finally{release()}}
+initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>{console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT);financeTick();setInterval(financeTick,60*60*1000).unref()})).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});

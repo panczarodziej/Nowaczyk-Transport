@@ -1,0 +1,7 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const f=require('../fleet-finance');
+test('schedule includes interest and clears principal',()=>{const rows=f.leaseSchedule(240000,8,48,'2026-12-15');assert.equal(rows.length,48);assert.equal(rows[0].due,'2026-12-15');assert.equal(rows[1].due,'2027-01-15');assert.ok(rows[0].interest>0);assert.ok(Math.abs(rows.reduce((s,r)=>s+r.principal,0)-240000)<.02)});
+test('scheduled charge is idempotent and company isolated',()=>{const db={initialBudgets:{a:{initialCents:200000},b:{initialCents:10000}},ledger:[],fleetLeases:[{id:'l',companyId:'a',vehicleId:'v',schedule:[{number:1,due:'2026-11-01',amount:100,status:'pending'}]}]};assert.equal(f.processDue(db,'2026-11-14'),true);assert.equal(f.processDue(db,'2026-11-14'),false);assert.equal(db.ledger.length,1);assert.equal(db.ledger[0].companyId,'a');assert.equal(f.cash(db,'b'),100)});
+test('insufficient balance keeps payment overdue without debit',()=>{const db={initialBudgets:{a:{initialCents:500}},ledger:[],fleetLeases:[{id:'l',companyId:'a',vehicleId:'v',schedule:[{number:1,due:'2026-11-01',amount:100,status:'pending'}]}]};f.processDue(db,'2026-11-14');assert.equal(db.fleetLeases[0].schedule[0].status,'overdue');assert.equal(db.ledger.length,0)});
+test('policy reminder appears for owning company only',()=>{const db={fleetPolicies:[{id:'p',companyId:'a',kind:'OC',end:'2026-11-20',due:'2026-10-01',paid:true}]};assert.equal(f.notices(db,'a','2026-11-14').length,1);assert.equal(f.notices(db,'b','2026-11-14').length,0)});
