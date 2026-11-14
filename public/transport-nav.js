@@ -47,8 +47,7 @@
   switchView.href='/moj-panel.html';
   switchView.textContent='Widok kierowcy →';
   switchView.style.marginLeft='auto';
-  if(header)header.append(switchView);
-  else menu.prepend(switchView);
+  (header?.querySelector('.transport-heading-actions')||header||menu).append(switchView);
  }
  if(header)header.after(menu);
  else{
