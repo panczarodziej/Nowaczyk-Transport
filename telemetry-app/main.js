@@ -183,47 +183,73 @@ async function autoDispatch(){
  }catch(error){autoDispatchMessage=error.message}
  finally{autoDispatchBusy=false}
 }
-let updateStatus='Aktualizacje dostępne w zainstalowanej aplikacji Windows.';
+let updateStatus='Oczekiwanie na sprawdzenie aktualizacji.';
+let checkUpdates=async()=>({ok:false,status:updateStatus});
 function startUpdates(){
- if(!app.isPackaged||process.platform!=='win32')return;
+ if(!app.isPackaged||process.platform!=='win32'){
+  updateStatus='Aktualizacje działają w zainstalowanej wersji Windows.';
+  return;
+ }
  const {autoUpdater}=require('electron-updater');
+ autoUpdater.setFeedURL({provider:'github',owner:'panczarodziej',repo:'Nowaczyk-Transport'});
  autoUpdater.autoDownload=true;
  autoUpdater.autoInstallOnAppQuit=false;
- let downloaded=false,checkingGame=false;
+ autoUpdater.disableDifferentialDownload=true;
+ let downloaded=false,checkingGame=false,checking=false,downloading=false;
+ const logPath=path.join(app.getPath('userData'),'updates.log');
+ function status(message){
+  updateStatus=message;
+  try{fs.appendFileSync(logPath,new Date().toISOString()+' '+message+'\n')}catch{}
+ }
+ autoUpdater.logger={
+  info:message=>{try{fs.appendFileSync(logPath,String(message)+'\n')}catch{}},
+  warn:message=>{try{fs.appendFileSync(logPath,String(message)+'\n')}catch{}},
+  error:message=>{try{fs.appendFileSync(logPath,String(message)+'\n')}catch{}}
+ };
  async function installWhenIdle(){
-  if(!downloaded||checkingGame||syncInProgress||autoDispatchBusy||app.isQuitting)return;
+  if(!downloaded||checkingGame||app.isQuitting)return;
   checkingGame=true;
   try{
    const game=await gameStatus();
-   if(game.running!==false||syncInProgress||autoDispatchBusy||app.isQuitting)return;
+   if(game.running!==false){status('Aktualizacja pobrana. Zamknij ETS2, aby ją zainstalować.');return}
+   if(syncInProgress||autoDispatchBusy){status('Aktualizacja pobrana. Kończenie synchronizacji.');return}
    persistEvents();
-   downloaded=false;
-   updateStatus='Instalowanie aktualizacji…';
+   status('Instalowanie aktualizacji i ponowne uruchamianie aplikacji…');
    app.isQuitting=true;
-   autoUpdater.quitAndInstall();
+   autoUpdater.quitAndInstall(true,true);
   }catch(error){
    app.isQuitting=false;
-   updateStatus='Błąd instalacji: '+error.message;
+   status('Błąd instalacji: '+error.message);
   }finally{checkingGame=false}
  }
- autoUpdater.on('checking-for-update',()=>{updateStatus='Sprawdzanie aktualizacji…'});
- autoUpdater.on('update-not-available',()=>{updateStatus='Masz najnowszą wersję.'});
- autoUpdater.on('update-available',()=>{updateStatus='Pobieranie aktualizacji…'});
+ autoUpdater.on('checking-for-update',()=>status('Sprawdzanie aktualizacji…'));
+ autoUpdater.on('update-not-available',()=>status('Wersja '+app.getVersion()+' jest aktualna.'));
+ autoUpdater.on('update-available',info=>{downloading=true;status('Pobieranie wersji '+info.version+'…')});
+ autoUpdater.on('download-progress',progress=>status('Pobieranie aktualizacji: '+Math.floor(progress.percent)+'%'));
  autoUpdater.on('update-downloaded',()=>{
+  downloading=false;
   downloaded=true;
-  updateStatus='Aktualizacja pobrana. Instalacja po zamknięciu ETS2.';
+  status('Aktualizacja pobrana. Przygotowanie instalacji.');
   void installWhenIdle();
  });
- setInterval(()=>void installWhenIdle(),10000).unref();
  autoUpdater.on('error',error=>{
-  app.isQuitting=false;
-  updateStatus='Błąd aktualizacji: '+error.message;
+  downloading=false;
+  status('Błąd aktualizacji: '+error.message);
  });
- const check=()=>{if(!downloaded)autoUpdater.checkForUpdates().catch(error=>{updateStatus='Błąd aktualizacji: '+error.message})};
- check();
- setInterval(check,15*60*1000).unref();
+ checkUpdates=async()=>{
+  if(downloaded){await installWhenIdle();return {ok:true,status:updateStatus}}
+  if(checking||downloading)return {ok:true,status:updateStatus};
+  checking=true;
+  try{await autoUpdater.checkForUpdates();return {ok:true,status:updateStatus}}
+  catch(error){status('Błąd aktualizacji: '+error.message);return {ok:false,status:updateStatus}}
+  finally{checking=false}
+ };
+ setInterval(()=>void installWhenIdle(),10000).unref();
+ void checkUpdates();
+ setInterval(()=>void checkUpdates(),60000).unref();
 }
 app.whenReady().then(()=>{
+ ipcMain.handle('check-updates',()=>checkUpdates());
  ipcMain.handle('auto-dispatch-status',()=>({enabled:!!autoDispatchSettings().savePath,message:autoDispatchMessage}));
  ipcMain.handle('auto-dispatch-configure',async()=>{
   const picked=await dialog.showOpenDialog(win,{title:'Wybierz stały ręczny zapis ETS2 dla automatycznych tras',properties:['openFile'],filters:[{name:'Zapis ETS2',extensions:['sii']}]});
