@@ -98,6 +98,7 @@ async function load(target=1){
    const cargo=node('td',offer.cargoLabel);
    cargo.append(node('small',offer.cargoTons+' t · '+(offer.trailerType==='chlodnia'?'Chłodnia':'Plandeka')));
    const freight=node('td',pln.format(offer.freight));freight.className='amount';
+   if(offer.rateEUR!=null)freight.append(node('small',number.format(offer.rateEUR)+' €/km'));
    const action=node('td',offer.id);
    if(data.assign){
     const button=node('button','Przydziel');button.type='button';
