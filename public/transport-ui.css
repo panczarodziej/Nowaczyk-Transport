@@ -1,0 +1,75 @@
+:root {
+ --transport-navy:#073751;
+ --transport-active:#0b4b6a;
+ --transport-accent:#146587;
+ --transport-bg:#edf2f6;
+ --transport-ink:#183046;
+ --transport-muted:#50677b;
+ --transport-line:#d8e3eb;
+ --transport-row:#f5f8fa;
+ --transport-width:190px;
+}
+html{background:var(--transport-bg)}
+body{background:var(--transport-bg);color:var(--transport-ink);font:14px "Segoe UI",system-ui,sans-serif}
+a{color:var(--transport-accent)}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #227da3;outline-offset:3px}
+header,.topbar,.transport-bar{background:var(--transport-navy);color:#fff}
+header a,.transport-bar a{color:#c9e4f2}
+.transport-bar{display:flex;align-items:center;gap:25px;min-height:59px;padding:12px 24px;margin:0}
+.transport-bar a{text-decoration:none}
+.transport-bar strong{font-size:16px}
+.transport-nav{background:var(--transport-navy);padding:16px 0}
+.transport-nav a{display:block;padding:13px 20px;color:#c9e4f2;text-decoration:none}
+.transport-nav a:hover,.transport-nav a[aria-current]{background:var(--transport-active);color:#fff}
+.transport-nav a[aria-current]{border-left:4px solid #56c6ec;padding-left:16px}
+.transport-shell{display:grid;grid-template-columns:var(--transport-width) minmax(0,1fr);min-height:calc(100vh - 59px)}
+.transport-shell main{width:100%;max-width:none;margin:0;padding:24px}
+.transport-shell h1{margin:0 0 16px;font-size:25px}
+.transport-shell #logout{margin-left:auto}
+.transport-modules{gap:12px}
+.transport-modules a,.panel,.card,.box,.stat,body[data-view="firma"] article,body[data-view="dokumenty"] section,body[data-view="dokumenty"] article,body[data-view="rekrutacja"] form{
+ background:#fff;color:var(--transport-ink);border:1px solid var(--transport-line);border-radius:8px;box-shadow:none
+}
+.transport-modules a:hover{border-color:var(--transport-accent);background:var(--transport-row)}
+.transport-modules span,.muted,small{color:var(--transport-muted)}
+header small,.topbar small{color:#c9e4f2}
+button,.btn,.button,a.button{background:var(--transport-accent);color:white;border:1px solid var(--transport-accent);border-radius:5px;font-weight:600}
+button:hover,.btn:hover,.button:hover,a.button:hover{background:var(--transport-active)}
+button:disabled,.btn:disabled{opacity:.55;cursor:default}
+button.secondary,.btn.secondary{background:#fff;color:var(--transport-accent)}
+input:not([type=radio]):not([type=checkbox]),select,textarea{background:#fff;color:var(--transport-ink);border:1px solid #b8cbd9;border-radius:5px;max-width:100%}
+label,.eyebrow{color:var(--transport-ink)}
+th{background:#e8f0f5;color:#304e64;font-size:12px;text-transform:uppercase}
+td,th{border-bottom:1px solid #e4ebf1}
+tbody tr:nth-child(even){background:var(--transport-row)}
+body[data-view="system-login"]{display:block;padding:0}
+body[data-view="system-login"] .card{margin:clamp(36px,9vh,100px) auto;width:min(440px,calc(100% - 32px))}
+body[data-view="system-login"] .card h1{background:var(--transport-navy)}
+body[data-view="rekrutacja"] header{padding:0}
+body[data-view="rekrutacja"] header .transport-bar{padding:12px 24px}
+body[data-view="naczepy"]{max-width:none;margin:0;padding:0}
+body[data-view="naczepy"] main{max-width:1050px;margin:auto;padding:24px}
+body[data-view="spedytor"] aside{background:var(--transport-navy);width:var(--transport-width)}
+body[data-view="spedytor"] aside a:hover{background:var(--transport-active)}
+body[data-view="trasy"] #message{color:#174d3e}
+body[data-view="telemetry"] p,body[data-view="telemetry"] li,body[data-view="telemetry"] footer{color:var(--transport-muted)}
+body[data-view="telemetry"] .status{background:var(--transport-row);color:var(--transport-ink)}
+@media(max-width:700px){
+ .transport-shell{display:block}
+ .transport-shell main{padding:14px}
+ .transport-nav{display:flex;overflow:auto;padding:0}
+ .transport-nav a{white-space:nowrap}
+ .transport-bar{gap:12px;padding:12px 14px;flex-wrap:wrap}
+ body[data-view="spedytor"] aside{width:100%}
+}
+.transport-bar #logout{margin-left:auto}
+.transport-shell,.transport-bar,.transport-nav{box-sizing:border-box}
+body[data-view="rekrutacja"] h1{text-align:left;font-size:25px}
+body[data-view="rekrutacja"] .card{text-align:left}
+body[data-view="rekrutacja"] .card img{object-position:left}
+body[data-view="rekrutacja"] form{margin-left:0}
+body[data-view="spedytor"] aside{box-sizing:border-box;width:var(--transport-width);flex-shrink:0;padding:16px 0}
+body[data-view="spedytor"] aside h2{padding:0 16px;font-size:17px}
+body[data-view="spedytor"] aside a{border-radius:0;padding:13px 20px}
+@media(max-width:650px){body[data-view="spedytor"] aside{width:100%}}
+@media print{body[data-view="dokumenty"] .transport-bar{display:none}}

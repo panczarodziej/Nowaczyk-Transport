@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Nowaczyk Transport — Centrum operacyjne</title>
+<title>Nowaczyk Transport — Zarządzanie transportem</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f2f5f8;color:#182a3e;font:16px system-ui,sans-serif}
 header{background:#233446;color:white;padding:24px max(5vw,16px);display:flex;justify-content:space-between;align-items:center;gap:16px}header p{margin:0}
@@ -11,12 +11,26 @@ main{max-width:1100px;margin:40px auto;padding:0 20px}nav{display:grid;grid-temp
 nav a{display:block;padding:20px;border-radius:12px;background:white;color:#164f80;text-decoration:none;border:1px solid #d6e1ec}
 nav a:hover,nav a:focus-visible{border-color:#208ded}nav span{display:block;margin-top:6px;color:#526577}button{padding:10px 14px;cursor:pointer}
 </style>
+<link rel="stylesheet" href="/transport-ui.css">
+
 </head>
-<body>
-<header><p><strong>Nowaczyk Transport</strong></p><button id="logout">Wyloguj</button></header>
+<body data-view="index">
+<header class="transport-bar"><strong>Nowaczyk Transport</strong><a href="/system.html" aria-current="page">Zarządzanie transportem</a><button id="logout">Wyloguj</button></header>
+<div class="transport-shell">
+<aside class="transport-nav" aria-label="Nawigacja">
+<a href="/system.html" aria-current="page">Przegląd</a>
+<a href="/gielda.html">Giełda</a>
+<a href="/trasy.html">Przydzielone trasy</a>
+<a href="/centrum-floty.html">Mapa kierowców</a>
+<a href="/flota-online.html">Flota</a>
+<a href="/dokumenty.html">Dokumenty</a>
+<a href="/admin.html">Rekrutacja</a>
+<a href="/firma.html">Moja firma</a>
+<a href="/podwykonawcy.html">Podwykonawcy</a>
+</aside>
 <main>
-<h1>Centrum operacyjne</h1>
-<nav aria-label="Moduły">
+<h1>Zarządzanie transportem</h1>
+<nav class="transport-modules" aria-label="Moduły">
 <a href="/uzytkownicy.html"><strong>Role pracowników</strong><span>Konta i uprawnienia</span></a>
 <a href="/gielda.html"><strong>Giełda</strong><span>Gotowe oferty i przydzielanie tras</span></a>
 <a href="/flota-online.html"><strong>Flota</strong><span>Pojazdy i przydziały</span></a>
@@ -32,6 +46,7 @@ nav a:hover,nav a:focus-visible{border-color:#208ded}nav span{display:block;marg
 <a href="/moj-panel.html"><strong>Panel kierowcy</strong><span>Telemetria i instrukcja ETS2</span></a>
 </nav>
 </main>
+</div>
 <script>
 document.getElementById('logout').onclick=async()=>{
  await fetch('/api/logout',{method:'POST'});
