@@ -166,7 +166,7 @@ function drivingRoster(db){
  return [...accounts.values()].filter(a=>{
   if(!a.active||a.deletedAt)return false;
   if(employee(a))return true;
-  if(!['admin','boss'].includes(a.role)||a.companyId!==MAIN_COMPANY_ID)return false;
+  if(!['admin','boss','subcontractor'].includes(a.role))return false;
   const name=a.username.toLowerCase();
   return assigned.has(a.id)||routed.has(a.companyId+':'+name)||db.fleetPositions?.[name]?.companyId===a.companyId;
  });
@@ -236,7 +236,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
     !['/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
-    !['/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
+    !['/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
