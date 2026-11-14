@@ -210,13 +210,23 @@ function body(req){
 }
 // Orientacyjne stawki wirtualnej spedycji PLN/km, bez podatku VAT.
 const roundPLN=n=>Math.round(n*100)/100;
-function quoteFreight(km,cargo,tons,trailerType){
- const id=normalize(cargo);
- const chilled=trailerType==='chlodnia'||/frozen|fresh|fish|meat|milk|cheese|yogurt|icecream|chlod|mroz|ryb|mies|nabial/.test(id);
- const premium=/medical|medicine|pharma|electronic|computer|valuable|lek|elektronik/.test(id);
- const base=chilled?5.7:4.6;
- const rate=base+(premium?1.2:0)+Math.min(1.1,Math.max(0,Number(tons)||0)*0.035);
- return roundPLN(Math.max(0,Number(km)||0)*rate);
+// Fixed conversion for the virtual economy.
+const EURO_PLN=4.25;
+function quoteFreight(km,trailerType,from,to,emptyKm=0){
+ const region=value=>{
+  const key=normalize(value);
+  for(const [area,pattern] of Object.entries({
+   pl:/^(polska|poland|pl)$/,de:/^(niemcy|germany|de)$/,
+   benelux:/^(benelux|belgia|belgium|holandia|niderlandy|netherlands|luksemburg|luxembourg|be|nl|lu)$/,
+   fr:/^(francja|france|fr)$/,it:/^(wlochy|italy|it)$/,es:/^(hiszpania|spain|es)$/,
+   nordic:/^(skandynawia|dania|denmark|norwegia|norway|szwecja|sweden|finlandia|finland|dk|no|se|fi)$/
+  }))if(pattern.test(key))return area;
+ };
+ const origin=region(from),destination=region(to);
+ const corridor=origin==='pl'?destination:destination==='pl'?origin:null;
+ const rates={de:[1.05,1.225],benelux:[1.075,1.275],fr:[1.125,1.325],it:[1.175,1.375],es:[1.20,1.45],nordic:[1.375,1.625]};
+ const loadedRate=(rates[corridor]||[1.05,1.25])[trailerType==='chlodnia'?1:0];
+ return roundPLN((km*loadedRate+emptyKm*0.30)*EURO_PLN);
 }
 let offersCache;
 function marketOffers(){
@@ -235,7 +245,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
     !['/api/company/startup-finance','/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
-    !['/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
+    !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
@@ -384,14 +394,14 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/trailers'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const list=db.trailers||[];
-  if(isSubcontractorBoss(req))return send(res,200,{trailers:list.filter(t=>t.ownerCompanyId===me.companyId||
+  if(isSubcontractorBoss(req))return send(res,200,{assignees:[...accounts.values()].filter(a=>a.active&&a.companyId===me.companyId).map(safeAccount),trailers:list.filter(t=>t.ownerCompanyId===me.companyId||
    [...accounts.values()].some(a=>a.id===t.assigneeId&&a.active&&a.companyId===me.companyId))});
   if(canDispatch(req))return send(res,200,{trailers:list,assignees:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{trailers:list.filter(t=>t.assigneeId===me.id)});
  }
  if(u.pathname==='/api/trailers'&&method==='POST'){
-  if(!auth(req))return send(res,403,{error:'Tylko administrator może zmieniać naczepy'});
-  const a=await body(req),id=str(a.id,80),plate=str(a.plate,30).toUpperCase(),model=str(a.model,100),type=str(a.type,60),assigneeId=str(a.assigneeId,80),ownerCompanyId=str(a.ownerCompanyId,80)||MAIN_COMPANY_ID;
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
+  const a=await body(req),id=str(a.id,80),plate=str(a.plate,30).toUpperCase(),model=str(a.model,100),type=str(a.type,60),assigneeId=str(a.assigneeId,80),ownerCompanyId=isSubcontractorBoss(req)?who(req).companyId:str(a.ownerCompanyId,80)||MAIN_COMPANY_ID;
   if(!plate||!model||!['firanka','chlodnia','platforma','kontener','inna'].includes(type))return send(res,400,{error:'Podaj rejestrację, model i rodzaj naczepy'});
   if(!db.companies.some(c=>c.id===ownerCompanyId))return send(res,400,{error:'Nieznana firma właściciela'});
   const assignee=assigneeId?[...accounts.values()].find(x=>x.id===assigneeId&&x.active):null;
@@ -400,6 +410,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(db.trailers.some(t=>t.plate===plate&&t.id!==id))return send(res,409,{error:'Naczepa o tej rejestracji już istnieje'});
   let t=id?db.trailers.find(t=>t.id===id):null;
   if(id&&!t)return send(res,404,{error:'Nie znaleziono naczepy'});
+  if(isSubcontractorBoss(req)){
+   if(!t||t.ownerCompanyId!==ownerCompanyId)return send(res,403,{error:'Wniosek o nową naczepę złóż w Mojej firmie. Tu przypiszesz własne naczepy.'});
+   if(assignee&&assignee.companyId!==ownerCompanyId)return send(res,403,{error:'Wybierz kierowcę swojej firmy.'});
+   if(t.plate!==plate||t.model!==model||t.type!==type)return send(res,403,{error:'Możesz zmienić przypisanie naczepy.'});
+  }
   if(t?.requestId&&(ownerCompanyId!==t.ownerCompanyId||(assignee&&assignee.companyId!==t.ownerCompanyId))){
    return send(res,400,{error:'Wybierz kierowcę z firmy właściciela naczepy.'});
   }
@@ -687,12 +702,12 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/routes/quote'&&method==='POST'){
   if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Brak uprawnień'});
-  const a=await body(req),km=Number(a.plannedKm),tons=Number(a.cargoTons||0);
-  if(!Number.isFinite(km)||km<0||km>20000||!Number.isFinite(tons)||tons<0||tons>100)return send(res,400,{error:'Nieprawidłowy dystans lub masa'});
+  const a=await body(req),km=Number(a.plannedKm),tons=Number(a.cargoTons||0),emptyKm=Number(a.emptyKm??0);
+  if(!Number.isFinite(emptyKm)||emptyKm<0||emptyKm>20000||!Number.isFinite(km)||km<0||km>20000||!Number.isFinite(tons)||tons<0||tons>100)return send(res,400,{error:'Nieprawidłowy dystans lub masa'});
   const driver=str(a.driver,100).toLowerCase();
   if(isSubcontractorBoss(req)&&driver&&accounts.get(driver)?.companyId!==who(req).companyId)return send(res,403,{error:'Wybierz kierowcę swojej firmy.'});
   const rate=(db.driverRates||{})[driver]??0.7;
-  return send(res,200,{freight:quoteFreight(km,a.cargo,tons,a.trailerType),driverPay:roundPLN(km*rate),driverRate:rate,estimated:true});
+  return send(res,200,{freight:quoteFreight(km,a.trailerType,a.fromCountry,a.toCountry,emptyKm),emptyFreight:roundPLN(emptyKm*0.30*EURO_PLN),driverPay:roundPLN(km*rate),driverRate:rate,estimated:true});
  }
  if(u.pathname==='/api/freight-market'&&method==='GET'){
   if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Giełda jest dostępna dla szefa i dyspozytora.'});
@@ -734,14 +749,16 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const offer=offerId?marketOffers().find(item=>item.id===offerId):null;
   if(offerId&&!offer)return send(res,404,{error:'Oferta jest niedostępna.'});
   if(offer&&[...(db.routes||[]),...(db.archivedRoutes||[])].some(r=>r.offerId===offerId))return send(res,409,{error:'Oferta została już przydzielona.'});
-  const a=offer?{...offer,driver:input.driver,catalogProfile:'snapshot'}:input;
+  const a=offer?{...offer,driver:input.driver,emptyKm:input.emptyKm,catalogProfile:'snapshot'}:input;
   const from=str(a.from,120),to=str(a.to,120),driver=str(a.driver,100);
   if(!from||!to||!driver)return send(res,400,{error:'Podaj kierowcę, początek i koniec trasy'});
   const account=accounts.get(driver.toLowerCase());
   if(!account?.active||(isSubcontractorBoss(req)&&account.companyId!==who(req).companyId)||!(['admin','driver','probation'].includes(account.role)||(account.role==='boss'&&account.companyId===MAIN_COMPANY_ID)||account.id===who(req).id))return send(res,400,{error:'Wybierz aktywne konto z listy kierowców'});
   const plannedKm=Number(a.plannedKm);
   if(!Number.isFinite(plannedKm)||plannedKm<0||plannedKm>20000)return send(res,400,{error:'Nieprawidłowy dystans'});
-  const freight=quoteFreight(plannedKm,a.cargo,a.cargoTons,a.trailerType);if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
+  const emptyKm=Number(a.emptyKm??0);
+  if(!Number.isFinite(emptyKm)||emptyKm<0||emptyKm>20000)return send(res,400,{error:'Nieprawidłowy pusty przebieg.'});
+  const freight=quoteFreight(plannedKm,a.trailerType,a.fromCountry,a.toCountry,emptyKm);if(!Number.isFinite(freight)||freight<0||freight>10000000)return send(res,400,{error:'Nieprawidłowy fracht'});
   if(!Number.isFinite(Number(a.cargoTons||0))||Number(a.cargoTons||0)<0||Number(a.cargoTons||0)>100)return send(res,400,{error:'Nieprawidłowa masa ładunku'});
   const trailerType=str(a.trailerType,20);
   if(trailerType&&!['firanka','chlodnia'].includes(trailerType))return send(res,400,{error:'Wybierz plandekę lub chłodnię.'});
@@ -758,7 +775,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(!str(a.cargo,120)||!Number.isSafeInteger(plannedKm)||plannedKm<=0)return send(res,400,{error:'Podaj ładunek i planowany dystans w pełnych kilometrach.'});
    Object.assign(mapSetRoute,{mapSetFrom,mapSetTo});
   }
-  const r={...mapSetRoute,...(offer?{offerId}:{}),id:crypto.randomUUID(),trailerId:trailerId||null,trailerType:trailerType||trailer?.type||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
+  const r={...mapSetRoute,...(offer?{offerId}:{}),id:crypto.randomUUID(),trailerId:trailerId||null,trailerType:trailerType||trailer?.type||null,freight,companyId:account.companyId,driver:account.username,from,to,fromCountry:str(a.fromCountry,80),toCountry:str(a.toCountry,80),cargo:str(a.cargo,120),sourceCompany:str(a.sourceCompany,120),destinationCompany:str(a.destinationCompany,120),cargoTons:Number(a.cargoTons)||0,payRate:(db.driverRates||{})[driver.toLowerCase()]??0.7,plannedKm,emptyKm,drivenKm:0,status:'Przydzielona',createdAt:new Date().toISOString()};
   db.routes??=[];db.routes.push(r);await save(db);return send(res,201,r);
  }
  if(u.pathname==='/api/routes/progress'&&method==='POST'){
@@ -824,12 +841,12 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(!auth(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Brak dostępu do floty firmy'});
    return send(res,200,{fleet:fleet.filter(vehicle=>vehicle.companyId===me.companyId)});
   }
-  if(isSubcontractorBoss(req)&&u.searchParams.get('mine')!=='1')return send(res,200,{fleet:fleet.filter(v=>v.companyId===me.companyId),drivers:[]});
+  if(isSubcontractorBoss(req)&&u.searchParams.get('mine')!=='1')return send(res,200,{fleet:fleet.filter(v=>v.companyId===me.companyId),drivers:[...accounts.values()].filter(a=>a.active&&a.companyId===me.companyId).map(safeAccount)});
   if(auth(req)&&u.searchParams.get('mine')!=='1')return send(res,200,{fleet,drivers:[...accounts.values()].filter(a=>a.active).map(safeAccount)});
   return send(res,200,{fleet:fleet.filter(v=>v.driverAccountId===me.id&&v.companyId===me.companyId)});
  }
  if(u.pathname==='/api/fleet'&&method==='POST'){
-  if(!auth(req))return send(res,403,{error:'Tylko administrator'});
+  if(!companyManager(req))return send(res,403,{error:'Tylko administrator'});
   const a=await body(req),plate=str(a.plate,30).toUpperCase(),model=str(a.model,100),trailerPlate=str(a.trailerPlate,30).toUpperCase(),trailerModel=str(a.trailerModel,100),driverAccountId=str(a.driverAccountId,80),id=str(a.id,80);
   if(!plate||!model)return send(res,400,{error:'Podaj rejestrację i model ciągnika'});
   const acct=[...accounts.values()].find(x=>x.id===driverAccountId&&x.active);
@@ -839,9 +856,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(driverAccountId&&db.fleet.some(x=>x.driverAccountId===driverAccountId&&x.id!==id))return send(res,409,{error:'Ten kierowca ma już przypisany pojazd'});
   let v=id?db.fleet.find(x=>x.id===id):null;
   if(id&&!v)return send(res,404,{error:'Nie znaleziono pojazdu'});
+  if(isSubcontractorBoss(req)){
+   const companyId=who(req).companyId;
+   if(!v||v.companyId!==companyId)return send(res,403,{error:'Wniosek o nowy ciągnik złóż w Mojej firmie. Tu przypiszesz własne pojazdy.'});
+   if(acct&&acct.companyId!==companyId)return send(res,403,{error:'Wybierz kierowcę swojej firmy.'});
+   if(v.plate!==plate||v.model!==model)return send(res,403,{error:'Możesz zmienić przypisanie ciągnika.'});
+  }
   if(v?.purchasedAt&&acct&&acct.companyId!==v.companyId)return send(res,400,{error:'Wybierz kierowcę z firmy właściciela.'});
   if(!v){v={id:crypto.randomUUID()};db.fleet.push(v)}
-  Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:v.purchasedAt?v.companyId:acct?.companyId||MAIN_COMPANY_ID});
+  Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:(v.purchasedAt||isSubcontractorBoss(req))?v.companyId:acct?.companyId||MAIN_COMPANY_ID});
   await save(db);return send(res,200,v);
  }
  if(u.pathname.startsWith('/api/transport-documents')){
