@@ -950,9 +950,24 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    return send(res,200,{company:company.name,manager,routes:routes.map(({id,driver,from,to,sourceCompany,destinationCompany,cargo,cargoTons,deliveredAt,settledAt})=>
     ({id,driver,from,to,sourceCompany,destinationCompany,cargo,cargoTons,deliveredAt:deliveredAt||settledAt})),
     cmrs:(db.cmrDocuments||[]).filter(d=>routeIds.has(d.routeId)),
+    registrations:manager?(db.fleet||[]).filter(v=>v.companyId===companyId&&v.registrationDueAt).map(({id,model,plate,previousPlate,registrationDueAt,registeredAt})=>({id,model,plate,previousPlate,registrationDueAt,registeredAt})):[],
     fleet:fleet.map(({id,plate,model})=>({id,plate,model})),
     permits:manager?(db.vehiclePermits||[]).filter(d=>d.companyId===companyId):[],
     inspections:manager?(db.vehicleInspections||[]).filter(d=>d.companyId===companyId):[]});
+  }
+  if(u.pathname==='/api/transport-documents/registration'&&method==='POST'){
+   if(!manager)return send(res,403,{error:'Przerejestrowanie zapisuje szef firmy.'});
+   const a=await body(req),plate=str(a.plate,30).toUpperCase().replace(/\s+/g,' ');
+   const vehicle=(db.fleet||[]).find(v=>v.id===a.vehicleId&&v.companyId===companyId&&v.registrationDueAt);
+   if(!vehicle)return send(res,404,{error:'Wybierz ciągnik z zatwierdzonego wniosku swojej firmy.'});
+   if(vehicle.registeredAt)return send(res,409,{error:'Pojazd został już przerejestrowany.'});
+   const key=value=>String(value||'').toUpperCase().replace(/[\s-]/g,'');
+   if(!/^[A-Z0-9][A-Z0-9 -]{2,14}$/.test(plate)||key(plate)===key(vehicle.plate))return send(res,400,{error:'Wpisz nową rejestrację.'});
+   if((db.fleet||[]).some(v=>key(v.plate)===key(plate)||key(v.trailerPlate)===key(plate))||
+      (db.trailers||[]).some(v=>key(v.plate)===key(plate)))return send(res,409,{error:'Ta rejestracja jest już zajęta.'});
+   Object.assign(vehicle,{previousPlate:vehicle.plate,plate,registeredAt:new Date().toISOString(),registeredBy:me.username});
+   await save(db);
+   return send(res,200,vehicle);
   }
   if(u.pathname==='/api/transport-documents/cmr'&&method==='POST'){
    const a=await body(req),route=routes.find(r=>r.id===a.routeId);
@@ -1153,7 +1168,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const vehicle={id:crypto.randomUUID(),requestId:request.id,model,plate,description,brand:request.brand,chassis:request.chassis,
     color:request.color,emission:request.emission,mileage:request.mileage,financing,purchasedAt:createdAt};
    if(kind==='truck'){
-    (db.fleet??=[]).push({...vehicle,companyId,driverAccountId:'',driverUsername:''});
+    const registrationDueAt=companyId!==MAIN_COMPANY_ID&&financing==='cash'
+     ?new Date(Date.parse(createdAt)+7*86400000).toISOString():undefined;
+    (db.fleet??=[]).push({...vehicle,companyId,registrationDueAt,driverAccountId:'',driverUsername:''});
    }else{
     (db.trailers??=[]).push({...vehicle,ownerCompanyId:companyId,type:request.trailerType,createdAt,updatedAt:createdAt,assigneeId:'',assigneeUsername:''});
    }
