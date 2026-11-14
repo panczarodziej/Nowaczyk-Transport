@@ -29,7 +29,7 @@ function mapSetCompany(city,company){
 }
 
 function passwordHash(pass,s=crypto.randomBytes(16).toString('hex')){return {salt:s,hash:crypto.scryptSync(pass,s,64).toString('hex')}}
-function safeAccount(a){return {id:a.id,username:a.username,role:a.role,dispatchAccess:a.role!=='dispatcher'&&hasDispatcherRole(a),companyId:a.companyId,active:a.active}}
+function safeAccount(a){return {id:a.id,username:a.username,role:a.role,dispatchAccess:a.role!=='dispatcher'&&hasDispatcherRole(a),companyId:a.companyId,active:a.active,canHire:!a.active&&Boolean(a.pendingHire||a.dismissedAt)}}
 const MAIN_COMPANY_ID='nowaczyk';
 const LEGACY_COMPANY_ID='ks';
 const initial={ledger:[],companies:[{id:MAIN_COMPANY_ID,name:'Nowaczyk Transport',bases:['Wadowice'],open:true,logo:''}],applications:[],routes:[],expenses:[],drivers:[]};
@@ -129,14 +129,24 @@ function canAssignRoutes(req){
  return hasDispatcherRole(me)||(me?.role==='boss'&&me.companyId===MAIN_COMPANY_ID);
 }
 function canDrive(req){return auth(req)||['driver','probation'].includes(who(req)?.role)}
+function companyManager(req){return auth(req)||isSubcontractorBoss(req)}
+function employee(account){return !account.deletedAt&&['driver','probation'].includes(account.role)}
+function expenseCompany(db,expense){
+ return expense.companyId||(db.routes||[]).find(route=>route.id===expense.routeId)?.companyId||MAIN_COMPANY_ID;
+}
+function priceCents(value){
+ if(typeof value!=='string'||!/^(0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(value))return null;
+ return Math.round(Number(value)*100);
+}
+function httpsLink(value){
+ try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password}catch{return false}
+}
 function companyCashFlow(db,companyId){
-   const transactions=(db.ledger||[]).filter(x=>x.companyId===companyId).map(x=>Math.round(Number(x.amount||0)*100));
-   const income=transactions.reduce((sum,cents)=>sum+Math.max(0,cents),0);
-   const operatingCosts=(db.expenses||[]).filter(x=>{
-    const route=(db.routes||[]).find(r=>r.id===x.routeId);
-    return (x.companyId||route?.companyId||MAIN_COMPANY_ID)===companyId;
-   }).reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
-   const costs=transactions.reduce((sum,cents)=>sum+Math.max(0,-cents),operatingCosts);
+ const transactions=(db.ledger||[]).filter(x=>x.companyId===companyId).map(x=>Math.round(Number(x.amount||0)*100));
+ const income=transactions.reduce((sum,cents)=>sum+Math.max(0,cents),0);
+ const operatingCosts=(db.expenses||[]).filter(x=>expenseCompany(db,x)===companyId)
+  .reduce((sum,x)=>sum+Math.round(Number(x.amount||0)*100),0);
+ const costs=transactions.reduce((sum,cents)=>sum+Math.max(0,-cents),operatingCosts);
  return {income,costs};
 }
 function body(req){
@@ -170,7 +180,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&
-    !(method==='POST'&&u.pathname==='/api/fleet/buy')&&
+    !['/api/company/management','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/fleet'&&u.searchParams.get('company')==='1')&&
     !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
@@ -343,6 +353,9 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(db.trailers.some(t=>t.plate===plate&&t.id!==id))return send(res,409,{error:'Naczepa o tej rejestracji już istnieje'});
   let t=id?db.trailers.find(t=>t.id===id):null;
   if(id&&!t)return send(res,404,{error:'Nie znaleziono naczepy'});
+  if(t?.requestId&&(ownerCompanyId!==t.ownerCompanyId||(assignee&&assignee.companyId!==t.ownerCompanyId))){
+   return send(res,400,{error:'Wybierz kierowcę z firmy właściciela naczepy.'});
+  }
   if(!t){t={id:crypto.randomUUID(),createdAt:new Date().toISOString()};db.trailers.push(t)}
   Object.assign(t,{plate,model,type,ownerCompanyId,assigneeId,assigneeUsername:assignee?.username||'',assigneeRole:assignee?.role||'',updatedAt:new Date().toISOString()});
   await save(db);return send(res,200,t);
@@ -649,7 +662,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDispatch(req)&&(r.driver.toLowerCase()!==who(req).username.toLowerCase()||r.companyId!==who(req).companyId))return send(res,403,{error:'To nie jest Twoja trasa'});
   if(!['Paliwo','Opłata drogowa','Parking','Inne'].includes(a.type))return send(res,400,{error:'Nieprawidłowy rodzaj kosztu'});
   const amount=Number(a.amount);if(!Number.isFinite(amount)||amount<=0||amount>1000000)return send(res,400,{error:'Nieprawidłowa kwota'});
-  const e={id:crypto.randomUUID(),routeId:r.id,driver:r.driver,type:a.type,country:str(a.country,80),from:str(a.from,120),to:str(a.to,120),place:str(a.place,120),liters:Number(a.liters)||0,amount,currency:'PLN',createdAt:new Date().toISOString()};
+  const e={id:crypto.randomUUID(),routeId:r.id,companyId:r.companyId,driver:r.driver,type:a.type,country:str(a.country,80),from:str(a.from,120),to:str(a.to,120),place:str(a.place,120),liters:Number(a.liters)||0,amount,currency:'PLN',createdAt:new Date().toISOString()};
   db.expenses??=[];db.expenses.push(e);await save(db);return send(res,201,e);
  }
  if(u.pathname==='/api/companies'&&method==='GET')return send(res,200,db.companies.map(({id,name,bases,open,logo})=>({id,name,bases,open,logo})));
@@ -696,30 +709,131 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   Object.assign(v,{plate,model,trailerPlate,trailerModel,driverAccountId:driverAccountId||'',driverUsername:acct?.username||'',companyId:v.purchasedAt?v.companyId:acct?.companyId||MAIN_COMPANY_ID});
   await save(db);return send(res,200,v);
  }
- if(u.pathname==='/api/fleet/buy'&&method==='POST'){
-  if(!auth(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Tylko szef firmy'});
-  const me=who(req),companyId=me.companyId||MAIN_COMPANY_ID;
-  const a=await body(req),model=str(a.model,100),plate=str(a.plate,30).toUpperCase(),description=str(a.description,500);
-  if(!model||!plate||typeof a.amount!=='string'||!/^(0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(a.amount)||Number(a.amount)<=0){
-   return send(res,400,{error:'Podaj model, rejestrację i dodatnią cenę w PLN.'});
-  }
-  if(!db.companies.some(company=>company.id===companyId))return send(res,404,{error:'Nie znaleziono firmy'});
-  if((db.fleet||[]).some(vehicle=>vehicle.plate===plate))return send(res,409,{error:'Taka rejestracja już istnieje'});
-  const budget=pool
-   ?(await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId])).rows[0]?.initial_cents
-   :db.initialBudgets?.[companyId]?.initialCents;
-  const {income,costs}=companyCashFlow(db,companyId);
-  const cents=Math.round(Number(a.amount)*100);
-  if(budget==null)return send(res,409,{error:'Firma nie ma budżetu startowego.'});
-  if(Number(budget)+income-costs<cents)return send(res,409,{error:'Za mało środków na koncie firmy.'});
-  const createdAt=new Date().toISOString();
-  const vehicle={id:crypto.randomUUID(),model,plate,description,companyId,driverAccountId:'',driverUsername:'',purchasedAt:createdAt};
-  db.fleet??=[];
-  db.ledger??=[];
-  db.fleet.push(vehicle);
-  db.ledger.push({id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,type:'zakup_pojazdu',description:description||model,amount:-cents/100,createdAt});
+ if(u.pathname==='/api/company/management'&&method==='GET'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
+  const companyId=u.searchParams.get('companyId')||who(req).companyId;
+  if(companyId!==who(req).companyId&&!auth(req))return send(res,403,{error:'Brak dostępu do tej firmy.'});
+  if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Nie znaleziono firmy.'});
+  const expenses=(db.expenses||[]).filter(x=>expenseCompany(db,x)===companyId);
+  const charges=(db.ledger||[]).filter(x=>x.companyId===companyId&&x.amount<0);
+  return send(res,200,{
+   expenses:[...expenses.map(x=>({...x,amount:-x.amount})),...charges].sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))),
+   fleet:(db.fleet||[]).filter(x=>(x.companyId||MAIN_COMPANY_ID)===companyId),
+   trailers:(db.trailers||[]).filter(x=>(x.ownerCompanyId||MAIN_COMPANY_ID)===companyId),
+   drivers:(db.accounts||[]).filter(x=>x.companyId===companyId&&employee(x)).map(safeAccount),
+   requests:(db.vehicleRequests||[]).filter(x=>x.companyId===companyId),
+  });
+ }
+ if(u.pathname==='/api/company/charge'&&method==='POST'){
+  if(!auth(req))return send(res,403,{error:'Tylko główny szef lub administrator'});
+  const a=await body(req),description=str(a.description,500),type=str(a.type,20);
+  const cents=priceCents(a.amount);
+  if(!db.companies.some(c=>c.id===a.companyId))return send(res,404,{error:'Nie znaleziono firmy.'});
+  if(!['kara','mandat'].includes(type)||!description||!cents)return send(res,400,{error:'Podaj rodzaj obciążenia, kwotę i powód.'});
+  const charge={id:crypto.randomUUID(),companyId:a.companyId,type,description,amount:-cents/100,createdBy:who(req).username,createdAt:new Date().toISOString()};
+  (db.ledger??=[]).push(charge);
   await save(db);
-  return send(res,201,vehicle);
+  return send(res,201,charge);
+ }
+ if(u.pathname==='/api/company/fleet-expense'&&method==='POST'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
+  const a=await body(req),companyId=who(req).companyId,description=str(a.description,500),invoiceNumber=str(a.invoiceNumber,100);
+  const cents=priceCents(a.amount);
+  const vehicle=(db.fleet||[]).find(x=>x.id===a.vehicleId&&(x.companyId||MAIN_COMPANY_ID)===companyId)
+   ||(db.trailers||[]).find(x=>x.id===a.vehicleId&&(x.ownerCompanyId||MAIN_COMPANY_ID)===companyId);
+  if(!vehicle)return send(res,404,{error:'Wybierz pojazd swojej firmy.'});
+  if(!cents||!description)return send(res,400,{error:'Podaj opis i kwotę wydatku.'});
+  const expense={id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,type:'wyposażenie floty',description,
+   invoiceNumber,plate:vehicle.plate,amount:-cents/100,createdBy:who(req).username,createdAt:new Date().toISOString()};
+  (db.ledger??=[]).push(expense);
+  await save(db);
+  return send(res,201,expense);
+ }
+ if(u.pathname==='/api/company/employment'&&method==='POST'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
+  const a=await body(req),companyId=a.companyId||who(req).companyId;
+  if(companyId!==who(req).companyId&&!auth(req))return send(res,403,{error:'Brak dostępu do tej firmy.'});
+  const account=(db.accounts||[]).find(x=>x.id===a.id&&x.companyId===companyId&&employee(x));
+  if(!account)return send(res,404,{error:'Nie znaleziono konta kierowcy w tej firmie.'});
+  if(!['hire','dismiss'].includes(a.action))return send(res,400,{error:'Wybierz zatrudnienie lub zwolnienie.'});
+  const hiring=a.action==='hire';
+  if(hiring===account.active)return send(res,409,{error:'Status kierowcy już się zmienił.'});
+  if(hiring&&!account.pendingHire&&!account.dismissedAt)return send(res,403,{error:'Konto jest zablokowane administracyjnie.'});
+  account.active=hiring;
+  if(!hiring){
+   account.dismissedAt=new Date().toISOString();
+   revokeAccountSessions(db,account.id);
+   for(const vehicle of db.fleet||[]){
+    if(vehicle.driverAccountId===account.id)Object.assign(vehicle,{driverAccountId:'',driverUsername:''});
+   }
+   for(const trailer of db.trailers||[]){
+    if(trailer.assigneeId===account.id)Object.assign(trailer,{assigneeId:'',assigneeUsername:'',assigneeRole:''});
+   }
+  }else{
+   delete account.dismissedAt;
+   delete account.pendingHire;
+  }
+  await save(db);
+  accounts.set(account.username.toLowerCase(),account);
+  return send(res,200,safeAccount(account));
+ }
+ if(['/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&method==='POST'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});
+  if(u.pathname==='/api/fleet/buy')return send(res,409,{error:'Złóż wniosek w zakładce Moja firma.'});
+  const a=await body(req),companyId=who(req).companyId;
+  if(!db.companies.some(c=>c.id===companyId))return send(res,404,{error:'Nie znaleziono firmy.'});
+  const kind=str(a.kind,10),financing=str(a.financing,10),brand=str(a.brand,60),model=str(a.model,100);
+  const chassis=str(a.chassis,10),color=str(a.color,60),emission=kind==='truck'?str(a.emission,10):'';
+  const mileage=Number(a.mileage),amount=priceCents(a.amount),listing=str(a.listing,2048);
+  const plate=financing==='cash'?str(a.plate,30).toUpperCase():'';
+  const bankCity=financing==='lease'?str(a.bankCity,100):'';
+  const downPayment=financing==='lease'?priceCents(a.downPayment):amount;
+  const trailerType=kind==='trailer'?str(a.trailerType,20):'';
+  if(!['truck','trailer'].includes(kind)||!['cash','lease'].includes(financing)||!brand||!model||
+     !['mega','standard'].includes(chassis)||!color||!/^\d{1,8}$/.test(a.mileage)||!amount||!httpsLink(listing)||
+     (kind==='truck'&&!['Euro 5','Euro 6'].includes(emission))||
+     (kind==='trailer'&&!['firanka','chlodnia','platforma','kontener','inna'].includes(trailerType))||
+     (financing==='cash'&&!plate)||(financing==='lease'&&(!bankCity||downPayment===null||downPayment>amount))){
+   return send(res,400,{error:'Uzupełnij dane pojazdu, cenę, link HTTPS i dane finansowania.'});
+  }
+  const request={id:crypto.randomUUID(),companyId,kind,financing,brand,model,chassis,color,emission,mileage,amount,listing,plate,
+   bankCity,downPayment,trailerType,description:str(a.description,500),status:'pending',submittedBy:who(req).username,createdAt:new Date().toISOString()};
+  (db.vehicleRequests??=[]).push(request);
+  await save(db);
+  return send(res,201,request);
+ }
+ if(u.pathname==='/api/company/vehicle-requests/decide'&&method==='POST'){
+  if(who(req)?.role!=='admin')return send(res,403,{error:'Wnioski rozpatruje administracja.'});
+  const a=await body(req),request=(db.vehicleRequests||[]).find(x=>x.id===a.id);
+  if(!request)return send(res,404,{error:'Nie znaleziono wniosku.'});
+  if(request.status!=='pending')return send(res,409,{error:'Wniosek został już rozpatrzony.'});
+  if(!['approved','rejected'].includes(a.status))return send(res,400,{error:'Wybierz decyzję.'});
+  const createdAt=new Date().toISOString(),decisionNote=str(a.note,500);
+  if(a.status==='rejected'&&!decisionNote)return send(res,400,{error:'Podaj powód odrzucenia.'});
+  if(a.status==='approved'){
+   const {companyId,kind,financing,model,description,downPayment}=request;
+   const plate=financing==='lease'?str(a.plate,30).toUpperCase():request.plate;
+   if(!plate)return send(res,400,{error:'Wpisz rejestrację z miasta banku lub leasingodawcy.'});
+   if([...(db.fleet||[]),...(db.trailers||[])].some(x=>x.plate===plate))return send(res,409,{error:'Ta rejestracja jest już we flocie.'});
+   const budget=pool
+    ?(await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId])).rows[0]?.initial_cents
+    :db.initialBudgets?.[companyId]?.initialCents;
+   const {income,costs}=companyCashFlow(db,companyId);
+   if(budget==null||Number(budget)+income-costs<downPayment)return send(res,409,{error:'Firma nie ma budżetu startowego lub wystarczających środków.'});
+   const vehicle={id:crypto.randomUUID(),requestId:request.id,model,plate,description,brand:request.brand,chassis:request.chassis,
+    color:request.color,emission:request.emission,mileage:request.mileage,financing,purchasedAt:createdAt};
+   if(kind==='truck'){
+    (db.fleet??=[]).push({...vehicle,companyId,driverAccountId:'',driverUsername:''});
+   }else{
+    (db.trailers??=[]).push({...vehicle,ownerCompanyId:companyId,type:request.trailerType,createdAt,updatedAt:createdAt,assigneeId:'',assigneeUsername:''});
+   }
+   if(downPayment>0)(db.ledger??=[]).push({id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,
+    type:financing==='lease'?'wpłata leasingowa':'zakup_pojazdu',description:[model,plate,description].filter(Boolean).join(' · '),amount:-downPayment/100,createdAt});
+   Object.assign(request,{plate,vehicleId:vehicle.id});
+  }
+  Object.assign(request,{status:a.status,decisionNote,decidedBy:who(req).username,decidedAt:createdAt});
+  await save(db);
+  return send(res,200,request);
  }
  if(u.pathname==='/api/fleet/sell'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Sprzedaż jest dostępna dla głównego szefa i administratora.'});
@@ -798,7 +912,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!db.companies.some(company=>company.id===companyId))return send(res,400,{error:'Wybierz istniejącą firmę.'});
   if(role==='subcontractor'&&companyId===MAIN_COMPANY_ID)return send(res,400,{error:'Wybierz firmę podwykonawcy.'});
   if(accounts.has(username.toLowerCase()))return send(res,409,{error:'Login zajęty'});
-  const acct={id:crypto.randomUUID(),username,role,dispatchAccess:['driver','probation'].includes(role)&&a.dispatchAccess===true,companyId,active:true,...passwordHash(pass)};
+  const pendingHire=['driver','probation'].includes(role)&&a.pendingHire===true;
+  const acct={id:crypto.randomUUID(),username,role,pendingHire,dispatchAccess:['driver','probation'].includes(role)&&a.dispatchAccess===true,companyId,active:!pendingHire,...passwordHash(pass)};
   accounts.set(username.toLowerCase(),acct);db.accounts=[...accounts.values()];await save(db);return send(res,201,safeAccount(acct));
  }
  if(u.pathname==='/api/accounts/update'&&method==='POST'){
@@ -814,7 +929,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(a.role!==undefined||['admin','boss','subcontractor'].includes(acct.role))return send(res,403,{error:'Przeniesienie firmy jest dostępne dla kont pracowników.'});
    acct.companyId=companyId;
   }
-  if(typeof a.active==='boolean')acct.active=a.active;
+  if(typeof a.active==='boolean'){
+   acct.active=a.active;
+   delete acct.pendingHire;
+   delete acct.dismissedAt;
+  }
   if(a.password!==undefined)Object.assign(acct,passwordHash(a.password));
   if(a.role!==undefined&&ROLES.includes(a.role)&&acct.role!=='admin')acct.role=a.role;
   if(!['driver','probation'].includes(acct.role))delete acct.dispatchAccess;

@@ -18,7 +18,9 @@ article strong{font-size:27px}
 #companySettings article,#createCompany{margin:14px 0}
 form,label{margin:8px 0}
 label{display:block}
-input,button{font:inherit;padding:7px}
+input,select,button{font:inherit;padding:7px;max-width:100%}
+#vehicleRequest label>*{display:block;width:100%;margin-top:5px}
+#vehicleRequest button{align-self:end;margin-bottom:8px}
 button+button{margin-left:8px}
 </style>
 </head>
@@ -36,6 +38,7 @@ button+button{margin-left:8px}
  <button>Utwórz firmę</button>
 </form>
 <div id="companySettings"></div>
+<div id="ownManagement"></div>
 <p id="status" role="status">Pobieranie danych…</p>
 <section id="companyMoney" hidden>
 <h2>Pieniądze firmy</h2>
@@ -45,16 +48,26 @@ button+button{margin-left:8px}
 <article><h2>Koszty</h2><strong id="costCents">—</strong></article>
 </div>
 <p id="moneyStatus" role="status"></p>
-<h2>Zakup ciągnika</h2>
-<form id="buyTruck">
- <label>Model <input name="model" maxlength="100" placeholder="Scania NG" required></label>
- <label>Rejestracja <input name="plate" maxlength="30" required></label>
+<h2>Wniosek o zakup lub leasing</h2>
+<form id="vehicleRequest" class="grid">
+ <label>Pojazd <select name="kind"><option value="truck">Ciągnik</option><option value="trailer">Naczepa</option></select></label>
+ <label>Finansowanie <select name="financing"><option value="cash">Gotówka</option><option value="lease">Leasing</option></select></label>
+ <label>Marka <input name="brand" maxlength="60" placeholder="Scania" required></label>
+ <label>Model <input name="model" maxlength="100" placeholder="Scania S500" required></label>
+ <label>Podwozie <select name="chassis"><option value="standard">Standard</option><option value="mega">Mega</option></select></label>
+ <label>Kolor <input name="color" maxlength="60" required></label>
+ <label>Emisja spalin <select name="emission"><option>Euro 6</option><option>Euro 5</option></select></label>
+ <label>Typ naczepy <select name="trailerType"><option value="firanka">Firanka</option><option value="chlodnia">Chłodnia</option><option value="platforma">Platforma</option><option value="kontener">Kontener</option><option value="inna">Inna</option></select></label>
+ <label>Przebieg (km) <input name="mileage" type="number" min="0" max="99999999" step="1" required></label>
  <label>Cena (PLN) <input name="amount" type="number" min="0.01" max="999999999.99" step="0.01" required></label>
- <label>Opis zakupu <input name="description" maxlength="500"></label>
- <button>Kup i dodaj do floty</button>
+ <label>Link do ogłoszenia <input name="listing" type="url" maxlength="2048" placeholder="https://…" required></label>
+ <label>Własna rejestracja <input name="plate" maxlength="30" required></label>
+ <label>Miasto banku lub leasingodawcy <input name="bankCity" maxlength="100" placeholder="Gdańsk" required></label>
+ <label>Wpłata początkowa (PLN) <input name="downPayment" type="number" min="0" max="999999999.99" step="0.01" value="0" required></label>
+ <label>Opis <input name="description" maxlength="500"></label>
+ <button>Wyślij do administracji</button>
 </form>
 <p id="buyStatus" role="status"></p>
-<h2>Flota firmy</h2><ul id="companyFleet"></ul>
 </section>
 <div class="grid" id="stats">
 <article><h2>Przejechane kilometry</h2><strong id="km">—</strong></article>
@@ -98,6 +111,94 @@ function action(button,run){
  get('settingsStatus').textContent='';
  Promise.resolve().then(run).then(loadCompanies).catch(error=>{get('settingsStatus').textContent=error.message}).finally(()=>{button.disabled=false});
 }
+function formField(form,label,name,attributes={}){
+ const wrapper=element('label',label),input=element('input');
+ Object.assign(input,{name,required:true,...attributes});
+ wrapper.append(input);form.append(wrapper);return input;
+}
+function managementForm(label,run){
+ const form=element('form'),button=element('button',label);
+ form.onsubmit=event=>{
+  event.preventDefault();
+  action(event.submitter,()=>run(Object.fromEntries(new FormData(form,event.submitter))));
+ };
+ return {form,button};
+}
+function renderManagement(card,company,data,user){
+ const canReview=user.role==='admin';
+ const vehicles=[...data.fleet,...data.trailers];
+ card.append(element('h3','Flota firmy'));
+ const list=element('ul');
+ for(const vehicle of vehicles)list.append(element('li',[vehicle.model,vehicle.plate,vehicle.driverUsername||vehicle.assigneeUsername].filter(Boolean).join(' · ')));
+ card.append(vehicles.length?list:element('p','Brak pojazdów we flocie.'));
+ if(!partners&&vehicles.length){
+  const {form,button}=managementForm('Zapisz wydatek',values=>api('/api/company/fleet-expense','POST',values));
+  const label=element('label','Pojazd '),select=element('select');select.name='vehicleId';
+  for(const vehicle of vehicles){const option=element('option',vehicle.model+' · '+vehicle.plate);option.value=vehicle.id;select.append(option)}
+  label.append(select);form.append(label);
+  formField(form,'Opis wydatku','description',{maxLength:500,placeholder:'Obrysy LED'});
+  formField(form,'Kwota (PLN)','amount',{type:'number',min:'0.01',step:'0.01'});
+  formField(form,'Numer faktury lub paragonu','invoiceNumber',{maxLength:100,required:false});
+  form.append(button);card.append(element('h3','Wyposażenie i wydatki na pojazd'),form);
+ }
+ card.append(element('h3','Historia wydatków'));
+ const expenses=element('ul');
+ for(const expense of data.expenses){
+  expenses.append(element('li',[expense.createdAt?.slice(0,10),expense.type,expense.description||expense.place,expense.plate,expense.invoiceNumber,money(Math.abs(expense.amount)*100)].filter(Boolean).join(' · ')));
+ }
+ card.append(data.expenses.length?expenses:element('p','Brak wydatków.'));
+ if(partners){
+  const {form,button}=managementForm('Obciąż konto firmy',values=>{
+   if(confirm('Obciążyć konto firmy '+company.name+'?'))return api('/api/company/charge','POST',{...values,companyId:company.id});
+  });
+  const label=element('label','Rodzaj obciążenia '),select=element('select');select.name='type';
+  for(const type of ['kara','mandat'])select.append(element('option',type));
+  label.append(select);form.append(label);
+  formField(form,'Powód','description',{maxLength:500});
+  formField(form,'Kwota (PLN)','amount',{type:'number',min:'0.01',step:'0.01'});
+  form.append(button);card.append(form);
+ }
+ card.append(element('h3','Kierowcy'));
+ if(!partners)card.append(element('p','Kierowcę możesz zatrudnić, gdy główny szef przygotuje konto w Twojej firmie.'));
+
+ if(!data.drivers.length)card.append(element('p','Brak kont kierowców w firmie.'));
+ for(const driver of data.drivers){
+  const row=element('p',driver.username+' · '+(driver.active?'Zatrudniony':driver.canHire?'Do zatrudnienia':'Zablokowany')+' ');
+  if(!driver.active&&!driver.canHire){card.append(row);continue}
+  const button=element('button',driver.active?'Zwolnij':'Zatrudnij');
+  button.onclick=()=>{
+   if(driver.active&&!confirm('Zwolnić kierowcę '+driver.username+'? Straci dostęp do konta i przydział pojazdów.'))return;
+   action(button,()=>api('/api/company/employment','POST',{id:driver.id,companyId:company.id,action:driver.active?'dismiss':'hire'}));
+  };
+  row.append(button);card.append(row);
+ }
+ card.append(element('h3','Wnioski flotowe'));
+ if(!data.requests.length)card.append(element('p','Brak wniosków.'));
+ for(const request of [...data.requests].reverse()){
+  const status={pending:'Oczekuje',approved:'Zatwierdzony',rejected:'Odrzucony'}[request.status];
+  const item=element('article');
+  item.append(element('h4',request.brand+' · '+request.model+' · '+status));
+  item.append(element('p',[
+   request.kind==='truck'?'Ciągnik':'Naczepa',request.trailerType,request.chassis,request.color,request.emission,
+   request.mileage.toLocaleString('pl-PL')+' km',money(request.amount),
+   request.financing==='cash'?'Gotówka':'Leasing · '+request.bankCity+' · wpłata '+money(request.downPayment),request.plate,request.description,
+  ].filter(Boolean).join(' · ')));
+  const listing=element('a','Otwórz ogłoszenie');listing.href=request.listing;listing.target='_blank';listing.rel='noopener noreferrer';item.append(listing);
+  if(request.decisionNote)item.append(element('p',request.decisionNote));
+  if(canReview&&request.status==='pending'){
+   const {form,button}=managementForm('Zatwierdź',values=>{
+    if(values.status==='rejected'&&!values.note?.trim())throw Error('Podaj powód odrzucenia.');
+    return api('/api/company/vehicle-requests/decide','POST',{...values,id:request.id});
+   });
+   if(request.financing==='lease')formField(form,'Rejestracja z miasta '+request.bankCity,'plate',{maxLength:30,required:false});
+   formField(form,'Uzasadnienie decyzji','note',{maxLength:500,required:false});
+   button.name='status';button.value='approved';
+   const reject=element('button','Odrzuć');reject.name='status';reject.value='rejected';
+   form.append(button,reject);item.append(form);
+  }
+  card.append(item);
+ }
+}
 async function loadCompanies(){
  const {user}=await api('/api/accounts/me');
  const companies=await api('/api/admin/companies');
@@ -105,7 +206,8 @@ async function loadCompanies(){
  const budgets=partners?await api('/api/budgets'):[];
  get('partnerLink').hidden=!manager||partners;
  get('createCompany').hidden=!partners;
- const cards=companies.filter(c=>partners?c.id!=='nowaczyk':c.id===user.companyId||manager&&c.id==='nowaczyk').map(company=>{
+ const visible=companies.filter(c=>partners?c.id!=='nowaczyk':c.id===user.companyId);
+ const cards=await Promise.all(visible.map(async company=>{
   const card=element('article');
   card.append(element('h2',company.name));
   if(company.logo){const img=element('img');img.src=company.logo;img.alt='Logo '+company.name;img.style.maxWidth='150px';card.append(img)}
@@ -121,14 +223,22 @@ async function loadCompanies(){
   const recruitment=element('button',company.open?'Zamknij rekrutację':'Otwórz rekrutację');recruitment.onclick=()=>action(recruitment,()=>update({open:!company.open}));
   card.append(logoLabel,basesLabel,save,recruitment);
   const budget=budgets.find(b=>b.companyId===company.id);
-  if(budget?.locked)card.append(element('p','Budżet startowy · '+money(budget.initialCents)));
+  if(budget?.locked)card.append(element('p','Saldo · '+money(budget.balanceCents)+' · Wydatki · '+money(budget.costCents)+' · Budżet startowy · '+money(budget.initialCents)));
   if(budget&&!budget.locked&&budget.canSetInitialBudget){
    const form=element('form'),label=element('label','Budżet startowy (PLN) '),amount=element('input'),submit=element('button','Nadaj budżet');
    amount.type='number';amount.min='0';amount.step='0.01';amount.required=true;label.append(amount);form.append(label,submit);card.append(form);
    form.onsubmit=event=>{event.preventDefault();if(confirm('Zatwierdzić budżet startowy? Kwota zostanie zablokowana.'))action(submit,()=>api('/api/budgets','POST',{companyId:company.id,amount:amount.value,confirm:true}))};
   }
+  const details=element(partners?'details':'article');
+  if(partners)details.append(element('summary','Flota, finanse, kierowcy i wnioski'));
+  const management=await api('/api/company/management?companyId='+encodeURIComponent(company.id));
+  renderManagement(details,company,management,user);
+  if(partners){
+   const expanded=[...get('companySettings').querySelectorAll('details[open]')].some(item=>item.dataset.company===company.id);
+   details.dataset.company=company.id;details.open=expanded;card.append(details);
+  }else get('ownManagement').replaceChildren(details);
   return card;
- });
+ }));
  get('companySettings').replaceChildren(...cards);
 }
 get('createCompany').onsubmit=event=>{
@@ -139,10 +249,6 @@ get('createCompany').onsubmit=event=>{
 if(partners){get('title').textContent='Podwykonawcy';get('stats').hidden=true;get('status').hidden=true}
 else{
  refresh();
- async function loadFleet(){
-  const {fleet}=await api('/api/fleet?company=1');
-  get('companyFleet').replaceChildren(...(fleet.length?fleet.map(vehicle=>element('li',vehicle.model+' · '+vehicle.plate+(vehicle.driverUsername?' · '+vehicle.driverUsername:''))):[element('li','Brak ciągników we flocie.')]));
- }
  async function refreshMoney(){
   try{
    const [budget]=await api('/api/budgets?mine=1');
@@ -155,20 +261,28 @@ else{
   }catch(error){if(get('companyMoney').hidden)return;get('moneyStatus').textContent=error.message}
 
  }
- get('buyTruck').onsubmit=async event=>{
+ const requestForm=get('vehicleRequest');
+ function syncRequestFields(){
+  const fields=requestForm.elements,truck=fields.kind.value==='truck',cash=fields.financing.value==='cash';
+  for(const [name,visible] of Object.entries({emission:truck,trailerType:!truck,plate:cash,bankCity:!cash,downPayment:!cash})){
+   fields[name].disabled=!visible;fields[name].parentElement.hidden=!visible;
+  }
+ }
+ requestForm.onchange=syncRequestFields;
+ syncRequestFields();
+ requestForm.onsubmit=async event=>{
   event.preventDefault();
-  const form=event.currentTarget,button=event.submitter;
+  const button=event.submitter;
   button.disabled=true;
   try{
-   const vehicle=await api('/api/fleet/buy','POST',Object.fromEntries(new FormData(form)));
-   form.reset();
-   get('buyStatus').textContent=vehicle.model+' dodany do floty. Koszt zapisano na koncie firmy.';
-   await Promise.all([refreshMoney(),loadFleet()]);
+   const request=await api('/api/company/vehicle-requests','POST',Object.fromEntries(new FormData(requestForm)));
+   requestForm.reset();syncRequestFields();
+   get('buyStatus').textContent='Wniosek dla '+request.model+' wysłany do administracji.';
+   await loadCompanies();
   }catch(error){get('buyStatus').textContent=error.message}
   finally{button.disabled=false}
  };
  refreshMoney();
- loadFleet().catch(()=>{});
  setInterval(refreshMoney,15000);
 }
 loadCompanies().catch(error=>{get('settingsStatus').textContent=error.message});
