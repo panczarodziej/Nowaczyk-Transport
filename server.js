@@ -109,6 +109,35 @@ function who(req){
  const account=accounts.get(session.username.toLowerCase());
  return account?.active&&account.id===session.id?{...safeAccount(account),expires:session.expires}:null;
 }
+function archiveDeletedLogin(db,account){
+ const key=account.username.toLowerCase();
+ // The archive key cannot be registered as a login. Keep historical rows and totals.
+ const archiveKey=key+'#'+account.id;
+ for(const records of [db.routes,db.archivedRoutes,db.expenses,db.fines,db.payments,
+  db.shopOrders,db.cmrDocuments,db.telemetryEvents,db.fleetActivityEvents]){
+  for(const record of records||[]){
+   if(record.driver?.toLowerCase()===key){
+    record.originalDriver=record.driver;
+    record.driver=archiveKey;
+    if(record.invoice&&!record.invoice.driverId)record.invoice.driverId=account.id;
+   }
+  }
+ }
+ for(const records of [db.wallets,db.driverRates,db.driverMapProfiles,db.tachographs]){
+  if(records&&Object.hasOwn(records,key)){
+   records[archiveKey]=records[key];
+   delete records[key];
+  }
+ }
+ if(db.fleetPositions&&Object.hasOwn(db.fleetPositions,key))delete db.fleetPositions[key];
+ for(const vehicle of db.fleet||[]){
+  if(vehicle.driverAccountId===account.id)Object.assign(vehicle,{driverAccountId:'',driverUsername:''});
+ }
+ for(const trailer of db.trailers||[]){
+  if(trailer.assigneeId===account.id)Object.assign(trailer,{assigneeId:'',assigneeUsername:'',assigneeRole:''});
+ }
+ revokeAccountSessions(db,account.id);
+}
 function revokeAccountSessions(db,id){
  for(const [key,session] of Object.entries(db.authSessions||{})){
   if(session.id===id)delete db.authSessions[key];
@@ -1067,10 +1096,16 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(role==='admin'&&who(req).role!=='admin')return send(res,403,{error:'Tylko administrator może utworzyć konto administratora'});
   if(!db.companies.some(company=>company.id===companyId))return send(res,400,{error:'Wybierz istniejącą firmę.'});
   if(role==='subcontractor'&&companyId===MAIN_COMPANY_ID)return send(res,400,{error:'Wybierz firmę podwykonawcy.'});
-  if(accounts.has(username.toLowerCase()))return send(res,409,{error:'Login zajęty'});
+  const key=username.toLowerCase(),previous=accounts.get(key);
+  if(previous&&!previous.deletedAt)return send(res,409,{error:'Login zajęty'});
   const pendingHire=['driver','probation'].includes(role)&&a.pendingHire===true;
   const acct={id:crypto.randomUUID(),username,role,pendingHire,dispatchAccess:['driver','probation'].includes(role)&&a.dispatchAccess===true,companyId,active:!pendingHire,...passwordHash(pass)};
-  accounts.set(username.toLowerCase(),acct);db.accounts=[...accounts.values()];await save(db);return send(res,201,safeAccount(acct));
+  if(previous)archiveDeletedLogin(db,previous);
+  db.accounts=[...accounts.values()].filter(account=>account.id!==previous?.id);
+  db.accounts.push(acct);
+  await save(db);
+  accounts.set(key,acct);
+  return send(res,201,safeAccount(acct));
  }
  if(u.pathname==='/api/accounts/update'&&method==='POST'){
   if(!auth(req))return send(res,403,{error:'Tylko administrator'});

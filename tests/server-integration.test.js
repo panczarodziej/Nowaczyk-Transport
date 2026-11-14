@@ -359,5 +359,16 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/accounts/password',{currentPassword:'dispatcher-password-only',newPassword:'boss-new-password'},dispatcher.cookie)).status,200);
  assert.equal((await req('/api/accounts/login',{username:'dispatcher1',password:'boss-new-password'})).status,200);
  assert.equal((await req('/api/login',{password:'integration-password-only'})).status,405);
+ assert.equal((await req('/api/accounts/delete',{username:'driver1'},admin.cookie)).status,200);
+ const recycled=await req('/api/accounts',{username:'Driver1',password:'recycled-driver-password',role:'driver'},admin.cookie);
+ assert.equal(recycled.status,201);
+ assert.notEqual(recycled.data.id,created.data.id);
+ const recycledLogin=await req('/api/accounts/login',{username:'driver1',password:'recycled-driver-password'});
+ assert.equal(recycledLogin.status,200);
+ assert.deepEqual((await req('/api/routes?mine=1',null,recycledLogin.cookie)).data,[]);
+ assert.equal((await req('/api/economy?mine=1',null,recycledLogin.cookie)).data.wallets.driver1,0);
+ const afterReuse=(await req('/api/company/summary',null,admin.cookie)).data;
+ assert.equal(afterReuse.km,914.8);
+ assert.equal(afterReuse.deliveries,2);
  }finally{await stop();fs.rmSync(dir,{recursive:true,force:true})}
 });
