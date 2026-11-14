@@ -265,7 +265,7 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/routes/archive',{id:otherRoute.data.id},dispatcher.cookie)).status,200);
  assert.equal((await req('/api/routes/export?id='+otherRoute.data.id,null,admin.cookie)).status,404);
  const cash={kind:'truck',financing:'cash',brand:'Scania',model:'S500',chassis:'standard',color:'biały',
-  emission:'Euro 6',mileage:'545424',amount:'100.25',listing:'https://example.com/scania',plate:'TEST 500'};
+  emission:'Euro 6',mileage:'545424',amount:'100.25',listing:'https://autoline.pl/scania',plate:'TEST 500'};
  const requests='/api/company/vehicle-requests';
  const review=requests+'/decide';
  const budgetForSub=async()=>(await req('/api/budgets?mine=1',null,sub.cookie)).data[0].balanceCents;
@@ -281,7 +281,8 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(purchase.status,201);
  assert.equal(purchase.data.companyId,company.data.id);
  assert.equal(await budgetForSub(),beforePurchase);
- const approval={id:purchase.data.id,status:'approved'};
+ const approval={id:purchase.data.id,status:'approved',listingPrice:'25',listingCurrency:'EUR'};
+ assert.equal((await req(review,{id:purchase.data.id,status:'approved'},admin.cookie)).status,400);
  assert.equal((await req(review,approval,sub.cookie)).status,403);
  const requestNotice=(await req('/api/notifications',null,dispatcher.cookie)).data.items.find(item=>item.review?.id===purchase.data.id);
  assert.equal(requestNotice.review.kind,'vehicle');
@@ -289,7 +290,7 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const approved=await req(review,approval,dispatcher.cookie);
  assert.equal(approved.status,200);
  assert.equal((await req(review,approval,admin.cookie)).status,409);
- assert.equal(await budgetForSub(),beforePurchase-10025);
+ assert.equal(await budgetForSub(),beforePurchase-10625);
  const license='/api/company/trailer-license';
  assert.equal((await req(requests,{...cash,kind:'trailer'},sub.cookie)).status,403);
  assert.equal((await req(license,{reason:'Flota firmy'},sub.cookie)).status,201);
@@ -307,7 +308,7 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const charge={companyId:company.data.id,amount:'10',description:'Przekroczenie prędkości',type:'mandat'};
  assert.equal((await req('/api/company/charge',charge,sub.cookie)).status,403);
  assert.equal((await req('/api/company/charge',charge,dispatcher.cookie)).status,201);
- assert.equal(await budgetForSub(),beforePurchase-10025-5000-4050-1000);
+ assert.equal(await budgetForSub(),beforePurchase-10625-5000-4050-1000);
  const management='/api/company/management?companyId='+encodeURIComponent(company.data.id);
  const managed=(await req(management,null,dispatcher.cookie)).data;
  assert.ok(managed.fleet.some(v=>v.plate==='TEST 500'));
@@ -321,7 +322,7 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal((await req('/api/trailers',{...partnerTrailer,assigneeId},sub.cookie)).status,200);
  assert.equal((await req('/api/trailers',{...partnerTrailer,id:'',assigneeId},sub.cookie)).status,409);
  const quote=await req('/api/routes/quote',{plannedKm:100,emptyKm:100,fromCountry:'Polska',toCountry:'Niemcy',trailerType:'firanka'},sub.cookie);
- assert.equal(quote.data.freight,573.75);
+ assert.equal(quote.data.freight,531.25);
  assert.equal(quote.data.emptyFreight,127.5);
  const employment='/api/company/employment';
  const employee=managed.drivers.find(driver=>driver.username===companyDriver.username);
@@ -360,7 +361,11 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const market='/api/freight-market';
  assert.equal((await req(market,null,login.cookie)).status,403);
  const offers=(await req(market,null,dispatcher.cookie)).data;
- assert.equal(offers.total,10000);
+ assert.equal(offers.total,25000);
+ const elkOffers=(await req(market+'?from=elk',null,dispatcher.cookie)).data;
+ assert.ok(elkOffers.total>0);
+ assert.ok(elkOffers.offers.every(offer=>offer.from==='Ełk'));
+ assert.ok(offers.offers.every(offer=>offer.fromCode!=='SY'&&offer.toCode!=='SY'));
  assert.equal(offers.offers.length,25);
  const filtered=(await req(market+'?from=Polska&to=Niemcy&trailer=chlodnia&min=18',null,dispatcher.cookie)).data;
  assert.ok(filtered.total>0);
@@ -373,7 +378,7 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(marketRoute.data.cargo,offer.cargo);
  assert.equal(marketRoute.data.freight,offer.freight);
  assert.equal((await req('/api/routes',assignment,dispatcher.cookie)).status,409);
- assert.equal((await req(market,null,dispatcher.cookie)).data.total,9999);
+ assert.equal((await req(market,null,dispatcher.cookie)).data.total,24999);
  const marketExport=await req('/api/routes/export?id='+marketRoute.data.id,null,dispatcher.cookie);
  assert.equal(marketExport.status,200);
  assert.equal(marketExport.data.from.city,offer.mapSetFrom);
