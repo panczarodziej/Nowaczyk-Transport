@@ -529,6 +529,26 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id)&&!b,fundingSource:funding?.source,loanRemainingCents:(db.companyLoans?.[c.id]?.remainingCents??0)+(funding?.remainingCents??0),locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b||db.companyLoans?.[c.id]?(b?.initialCents??0)+income-costs:null};
   });return send(res,200,budgets);
  }
+ if(u.pathname==='/api/company/loan-requests'&&method==='GET'){
+  if(!companyManager(req))return send(res,403,{error:'Brak uprawnień.'});
+  const me=who(req);
+  return send(res,200,(db.companyLoanRequests||[]).filter(x=>auth(req)||x.companyId===me.companyId).slice().reverse());
+ }
+ if(u.pathname==='/api/company/loan-requests/decide'&&method==='POST'){
+  if(!auth(req))return send(res,403,{error:'Wnioski zatwierdza główny szef.'});
+  const a=await body(req),request=(db.companyLoanRequests||[]).find(x=>x.id===a.id);
+  if(!request||request.status!=='pending')return send(res,409,{error:'Wniosek nie istnieje lub został rozpatrzony.'});
+  if(!['approved','rejected'].includes(a.decision))return send(res,400,{error:'Nieprawidłowa decyzja.'});
+  if(a.decision==='approved'){
+   const companyId=request.companyId,loans=db.companyLoans??={},current=loans[companyId];
+   if(current?.remainingCents>0||db.startupFinance?.[companyId]?.remainingCents>0)return send(res,409,{error:'Firma ma aktywny kredyt.'});
+   loans[companyId]={remainingCents:request.amountCents,createdAt:new Date().toISOString(),requestId:request.id};
+   (db.ledger??=[]).push({id:crypto.randomUUID(),companyId,type:'kredyt firmowy',
+    description:'Kredyt zatwierdzony przez głównego szefa',amount:request.amountCents/100,createdAt:new Date().toISOString(),requestId:request.id});
+  }
+  Object.assign(request,{status:a.decision,decidedAt:new Date().toISOString(),decidedBy:who(req).username});
+  await save(db);return send(res,200,request);
+ }
  if(u.pathname==='/api/company/loan'&&method==='POST'){
   if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy.'});
   const a=await body(req),cents=priceCents(a.amount),companyId=who(req).companyId;
@@ -546,6 +566,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   }
   if(a.action!=='borrow'||cents>50000000)return send(res,400,{error:'Wybierz kredyt do 500 000 zł.'});
   if(current?.remainingCents>0||db.startupFinance?.[companyId]?.remainingCents>0)return send(res,409,{error:'Najpierw spłać aktywny kredyt.'});
+  if(companyId!==MAIN_COMPANY_ID){
+   if((db.companyLoanRequests||[]).some(x=>x.companyId===companyId&&x.status==='pending'))return send(res,409,{error:'Masz już oczekujący wniosek kredytowy.'});
+   const request={id:crypto.randomUUID(),companyId,amountCents:cents,status:'pending',createdAt,requestedBy:who(req).username};
+   (db.companyLoanRequests??=[]).push(request);await save(db);return send(res,201,request);
+  }
   loans[companyId]={remainingCents:cents,createdAt};
   (db.ledger??=[]).push({id:crypto.randomUUID(),companyId,type:'kredyt firmowy',amount:cents/100,createdAt});
   await save(db);return send(res,201,loans[companyId]);
