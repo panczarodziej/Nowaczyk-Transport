@@ -5,14 +5,16 @@
 <script src="/transport-header.js" defer></script>
 <script src="/transport-nav.js" defer></script>
 <style>
-main{max-width:1000px;margin:auto;padding:24px}article{padding:18px;margin:14px 0;scroll-margin-top:20px}
+main{max-width:1100px;margin:auto;padding:30px 24px}article{padding:22px;margin:14px 0;scroll-margin-top:20px;border:1px solid #dce5ed;border-radius:14px;background:white;box-shadow:0 3px 12px #122c4510}.summary{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}.summary>div{background:white;border:1px solid #dce5ed;border-radius:12px;padding:18px;min-width:180px;flex:1}.summary strong{display:block;font-size:25px;margin-top:6px}.credit-card{border-left:5px solid #1677a4}.credit-actions{display:flex;gap:10px;flex-wrap:wrap}.credit-actions button{border:0;border-radius:8px;background:#146587;color:white;font-weight:700}.credit-actions button.reject{background:#b54b4b}.subheading{margin:30px 0 10px}
 article:target{outline:2px solid #146587}form{display:flex;align-items:end;gap:10px;flex-wrap:wrap}label{display:grid;gap:4px}
 input,button{padding:8px}article p{white-space:pre-wrap;overflow-wrap:anywhere}
 </style></head><body><main>
-<h1>Wnioski do rozpatrzenia</h1><p id="status" role="status">Wczytywanie wniosków…</p><div id="requests"></div>
+<h1>Wnioski do rozpatrzenia</h1><div class="summary"><div>Wnioski kredytowe<strong id="creditCount">—</strong></div><div>Łączna kwota oczekujących<strong id="creditSum">—</strong></div><div>Pozostałe wnioski<strong id="otherCount">—</strong></div></div><h2 class="subheading">Kredyty podwykonawców</h2><div id="creditRequests"></div><h2 class="subheading">Pozostałe wnioski</h2><p id="status" role="status">Wczytywanie wniosków…</p><div id="requests"></div>
 </main><script>
 const statusLine=document.getElementById('status');
 const root=document.getElementById('requests');
+const creditRoot=document.getElementById('creditRequests');
+const money=n=>(Number(n)/100).toLocaleString('pl-PL',{style:'currency',currency:'PLN'});
 function el(tag,text){const e=document.createElement(tag);e.textContent=text;return e}
 async function api(path,method='GET',body){
  const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -70,12 +72,36 @@ function render(item){
  };
  card.append(form,feedback);return card;
 }
+async function refreshCredits(){
+ const [requests,companies]=await Promise.all([api('/api/company/loan-requests'),api('/api/admin/companies')]);
+ const pending=requests.filter(r=>r.status==='pending');
+ document.getElementById('creditCount').textContent=String(pending.length);
+ document.getElementById('creditSum').textContent=money(pending.reduce((n,r)=>n+Number(r.amountCents),0));
+ creditRoot.replaceChildren();
+ for(const r of pending){
+  const card=el('article','');card.className='credit-card';
+  card.append(el('h2',(companies.find(c=>c.id===r.companyId)?.name||r.companyId)+' — '+money(r.amountCents)));
+  card.append(el('p','Wysłano: '+new Date(r.createdAt).toLocaleString('pl-PL')+' · Status: Oczekuje'));
+  const actions=el('div','');actions.className='credit-actions';
+  for(const [decision,label] of [['approved','Zatwierdź kredyt'],['rejected','Odrzuć wniosek']]){
+   const btn=el('button',label);if(decision==='rejected')btn.className='reject';
+   btn.onclick=async()=>{if(!confirm(label+' na '+money(r.amountCents)+'?'))return;for(const b of actions.querySelectorAll('button'))b.disabled=true;
+    try{await api('/api/company/loan-requests/decide','POST',{id:r.id,decision});await refreshCredits();statusLine.textContent='Decyzja kredytowa zapisana.'}
+    catch(e){statusLine.textContent=e.message;for(const b of actions.querySelectorAll('button'))b.disabled=false}};
+   actions.append(btn);
+  }card.append(actions);creditRoot.append(card);
+ }
+ if(!pending.length)creditRoot.append(el('p','Brak oczekujących wniosków kredytowych.'));
+}
 (async()=>{
+ await refreshCredits();
  const {items}=await api('/api/notifications');
  const rows=items.filter(item=>item.review);
  root.replaceChildren(...rows.map(render));
+ document.getElementById('otherCount').textContent=String(rows.length);
  const target=decodeURIComponent(location.hash.slice(1));
  if(target)document.getElementById(target)?.scrollIntoView();
  statusLine.textContent=rows.length?'':(target?'Ten wniosek został już rozpatrzony lub jest niedostępny.':'Brak wniosków do rozpatrzenia.');
 })().catch(error=>{statusLine.textContent=error.message});
+setInterval(()=>refreshCredits().catch(e=>{statusLine.textContent=e.message}),20000);
 </script></body></html>
