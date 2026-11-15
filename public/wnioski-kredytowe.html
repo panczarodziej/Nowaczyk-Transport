@@ -1,0 +1,22 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wnioski kredytowe — Nowaczyk Transport</title><link rel="stylesheet" href="/transport-ui.css"><style>body{font:16px Arial,sans-serif;background:#f1f4f7;color:#182c43;margin:0}main{max-width:950px;margin:32px auto;padding:20px}article{background:white;border:1px solid #d1dfee;border-radius:12px;padding:20px;margin:12px 0}button{padding:10px;margin-right:8px;cursor:pointer}a{color:#12568c}#status{min-height:24px}</style></head><body><main><a href="/firma.html">← Moja firma</a><h1>Wnioski kredytowe podwykonawców</h1><p>Wnioski zapisane w systemie. Przyznanie kredytu następuje dopiero po zatwierdzeniu.</p><button id="refresh">Odśwież listę</button><p id="status" role="status"></p><div id="list"></div></main><script>
+const list=document.getElementById('list'),status=document.getElementById('status');
+const money=n=>(Number(n)/100).toLocaleString('pl-PL',{style:'currency',currency:'PLN'});
+async function api(url,method='GET',data){const r=await fetch(url,{method,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});const result=await r.json();if(!r.ok)throw Error(result.error||'Błąd '+r.status);return result}
+async function refresh(){
+ try{
+  const [requests,companies]=await Promise.all([api('/api/company/loan-requests'),api('/api/admin/companies')]);
+  list.replaceChildren();
+  status.textContent='Liczba wniosków: '+requests.length+' · oczekujących: '+requests.filter(x=>x.status==='pending').length;
+  for(const request of requests){
+   const card=document.createElement('article'),title=document.createElement('h2');
+   title.textContent=(companies.find(c=>c.id===request.companyId)?.name||request.companyId)+' — '+money(request.amountCents);card.append(title);
+   const info=document.createElement('p');info.textContent='Status: '+({pending:'Oczekuje',approved:'Zatwierdzony',rejected:'Odrzucony'}[request.status]||request.status)+' · '+new Date(request.createdAt).toLocaleString('pl-PL');card.append(info);
+   if(request.status==='pending')for(const [decision,label] of [['approved','Zatwierdź'],['rejected','Odrzuć']]){
+    const button=document.createElement('button');button.textContent=label;button.onclick=async()=>{if(!confirm(label+' wniosek na '+money(request.amountCents)+'?'))return;button.disabled=true;try{await api('/api/company/loan-requests/decide','POST',{id:request.id,decision});await refresh()}catch(e){status.textContent=e.message;button.disabled=false}};card.append(button);
+   }list.append(card);
+  }
+  if(!requests.length){const p=document.createElement('p');p.textContent='Brak zapisanych wniosków.';list.append(p)}
+ }catch(e){status.textContent='Nie udało się pobrać wniosków: '+e.message}
+}
+document.getElementById('refresh').onclick=refresh;refresh();setInterval(refresh,20000);
+</script></body></html>
