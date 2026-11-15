@@ -51,7 +51,7 @@ button+button{margin-left:8px}
 <div id="partnerMileageRows"></div><p id="partnerMileageStatus" role="status"></p>
 <button id="partnerMileageRefresh" type="button">Odśwież kilometry</button>
 </section>
-<div id="companySettings"></div>
+<section id="loanApprovals" hidden><h2>Wnioski kredytowe podwykonawców</h2><div id="loanApprovalsList"></div><p id="loanApprovalsStatus" role="status"></p><button id="loanApprovalsRefresh" type="button">Odśwież wnioski</button></section><div id="companySettings"></div>
 <div id="ownManagement"></div>
 <p id="status" role="status">Pobieranie danych…</p>
 <section id="companyMoney" hidden>
@@ -268,12 +268,33 @@ function renderManagement(card,company,data,user){
   card.append(item);
  }
 }
+async function refreshLoanApprovals(){
+ const box=get('loanApprovalsList'),status=get('loanApprovalsStatus');
+ try{
+  const [requests,companies]=await Promise.all([api('/api/company/loan-requests'),api('/api/admin/companies')]);
+  box.replaceChildren();
+  for(const req of requests){
+   const row=element('article'),company=companies.find(c=>c.id===req.companyId);
+   row.append(element('p',(company?.name||req.companyId)+' · '+money(req.amountCents)+' · '+({pending:'Oczekuje',approved:'Zatwierdzony',rejected:'Odrzucony'}[req.status]||req.status)));
+   if(req.status==='pending')for(const [decision,label] of [['approved','Zatwierdź'],['rejected','Odrzuć']]){
+    const button=element('button',label);button.type='button';
+    button.onclick=async()=>{button.disabled=true;try{await api('/api/company/loan-requests/decide','POST',{id:req.id,decision});status.textContent='Decyzja zapisana.';await refreshLoanApprovals()}catch(e){status.textContent=e.message}finally{button.disabled=false}};
+    row.append(button);
+   }
+   box.append(row);
+  }
+  if(!requests.length)box.append(element('p','Brak wniosków kredytowych.'));
+ }catch(e){status.textContent=e.message}
+}
+get('loanApprovalsRefresh').onclick=refreshLoanApprovals;
 async function loadCompanies(){
  const {user}=await api('/api/accounts/me');
  const companies=await api('/api/admin/companies');
  const manager=user.role==='admin'||(user.role==='boss'&&user.companyId==='nowaczyk');
  const budgets=partners?await api('/api/budgets'):[];
  get('partnerLink').hidden=!manager||partners;
+ get('loanApprovals').hidden=!manager;
+ if(manager)refreshLoanApprovals();
  get('createCompany').hidden=!partners;
  const visible=companies.filter(c=>partners?c.id!=='nowaczyk':c.id===user.companyId);
  const cards=await Promise.all(visible.map(async company=>{
@@ -349,12 +370,14 @@ else{
    if(partner){
     const startupDebt=budget.fundingSource==='credit'&&budget.loanRemainingCents>0;
     const companyDebt=budget.loanRemainingCents>0&&!startupDebt;
-    loanForm.hidden=startupDebt;
-    get('companyLoanDetails').textContent=startupDebt?'Najpierw spłać kredyt startowy.':companyDebt?'Pozostało do spłaty: '+money(budget.loanRemainingCents):'Kredyt firmowy bez odsetek, maksymalnie 500 000 zł. Jeden aktywny kredyt.';
+    const loanRequests=await api('/api/company/loan-requests');
+    const pending=loanRequests.find(x=>x.status==='pending');
+    loanForm.hidden=startupDebt||!!pending;
+    get('companyLoanDetails').textContent=pending?'Wniosek o '+money(pending.amountCents)+' oczekuje na decyzję głównego szefa.':startupDebt?'Najpierw spłać kredyt startowy.':companyDebt?'Pozostało do spłaty: '+money(budget.loanRemainingCents):'Kredyt firmowy bez odsetek, maksymalnie 500 000 zł. Jeden aktywny kredyt.';
     loanForm.querySelector('button').textContent=companyDebt?'Spłać kredyt':'Weź kredyt';
     loanForm.onsubmit=async event=>{
      event.preventDefault();const button=loanForm.querySelector('button');button.disabled=true;
-     try{await api('/api/company/loan','POST',{action:companyDebt?'repay':'borrow',amount:String(new FormData(loanForm).get('amount'))});loanForm.reset();get('companyLoanStatus').textContent='Zapisano operację kredytową.';await refreshMoney()}
+     try{await api('/api/company/loan','POST',{action:companyDebt?'repay':'borrow',amount:String(new FormData(loanForm).get('amount'))});loanForm.reset();get('companyLoanStatus').textContent=companyDebt?'Spłata zaksięgowana.':'Wniosek wysłany do zatwierdzenia.';await refreshMoney()}
      catch(e){get('companyLoanStatus').textContent=e.message}finally{button.disabled=false}
     };
    }
