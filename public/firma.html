@@ -36,7 +36,7 @@ button+button{margin-left:8px}
 <h1 id="title">Moja firma</h1>
 <p><a href="/finanse-floty.html">Leasing, ubezpieczenia i opłaty drogowe →</a></p>
 <nav><a href="/dokumenty.html">Dokumenty transportowe</a> · <a href="/admin.html">Rekrutacja</a> · <a href="/centrum-floty.html">Mapa kierowców</a> <a id="partnerLink" href="/podwykonawcy.html" hidden> · Podwykonawcy</a></nav>
-<nav aria-label="Wnioski"><a href="/admin.html">Podania o pracę</a> · <a href="/firma.html#vehicleRequests">Wnioski o ciągnik i naczepę</a></nav>
+<nav aria-label="Wnioski"><a id="loanRequestsNav" href="/firma.html#loanApprovals" hidden>Wnioski kredytowe <strong id="loanRequestsCount"></strong></a> · <a href="/admin.html">Podania o pracę</a> · <a href="/firma.html#vehicleRequests">Wnioski o ciągnik i naczepę</a></nav>
 <p id="settingsStatus" role="status"></p>
 <form id="createCompany" hidden>
  <label>Nazwa firmy <input name="name" required minlength="2" maxlength="90"></label>
@@ -273,6 +273,8 @@ async function refreshLoanApprovals(){
  try{
   const [requests,companies]=await Promise.all([api('/api/company/loan-requests'),api('/api/admin/companies')]);
   box.replaceChildren();
+  const pendingCount=requests.filter(r=>r.status==='pending').length;
+  get('loanRequestsCount').textContent=pendingCount?'('+pendingCount+')':'';
   for(const req of requests){
    const row=element('article'),company=companies.find(c=>c.id===req.companyId);
    row.append(element('p',(company?.name||req.companyId)+' · '+money(req.amountCents)+' · '+({pending:'Oczekuje',approved:'Zatwierdzony',rejected:'Odrzucony'}[req.status]||req.status)));
@@ -283,10 +285,11 @@ async function refreshLoanApprovals(){
    }
    box.append(row);
   }
-  if(!requests.length)box.append(element('p','Brak wniosków kredytowych.'));
+  if(!requests.length)box.append(element('p','Brak zapisanych wniosków kredytowych. Poproś podwykonawcę o sprawdzenie komunikatu po wysłaniu.'));
  }catch(e){status.textContent=e.message}
 }
 get('loanApprovalsRefresh').onclick=refreshLoanApprovals;
+setInterval(()=>{if(!get('loanApprovals').hidden)refreshLoanApprovals()},15000);
 async function loadCompanies(){
  const {user}=await api('/api/accounts/me');
  const companies=await api('/api/admin/companies');
@@ -294,7 +297,8 @@ async function loadCompanies(){
  const budgets=partners?await api('/api/budgets'):[];
  get('partnerLink').hidden=!manager||partners;
  get('loanApprovals').hidden=!manager;
- if(manager)refreshLoanApprovals();
+ get('loanRequestsNav').hidden=!manager;
+ if(manager)await refreshLoanApprovals();
  get('createCompany').hidden=!partners;
  const visible=companies.filter(c=>partners?c.id!=='nowaczyk':c.id===user.companyId);
  const cards=await Promise.all(visible.map(async company=>{
