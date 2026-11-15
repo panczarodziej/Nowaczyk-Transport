@@ -49,6 +49,22 @@
   switchView.style.marginLeft='auto';
   (header?.querySelector('.transport-heading-actions')||header||menu).append(switchView);
  }
+ if(partner){
+  const logout=document.createElement('button');
+  logout.type='button';
+  logout.textContent='Wyloguj';
+  logout.className='transport-partner-logout';
+  logout.style.cssText='background:#17698e;color:white;border:0;border-radius:5px;padding:10px 16px;font:inherit;font-weight:700;cursor:pointer;margin-left:12px';
+  logout.addEventListener('click',async()=>{
+   logout.disabled=true;logout.textContent='Wylogowywanie…';
+   try{
+    const response=await fetch('/api/logout',{method:'POST',credentials:'same-origin'});
+    if(!response.ok)throw Error('Nie udało się wylogować.');
+    location.replace('/');
+   }catch(error){logout.disabled=false;logout.textContent='Wyloguj';alert(error.message)}
+  });
+  (header?.querySelector('.transport-heading-actions')||header||menu).append(logout);
+ }
  if(header)header.after(menu);
  else{
   const bar=document.createElement('header');
