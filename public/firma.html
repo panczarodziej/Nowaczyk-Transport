@@ -68,7 +68,7 @@ button+button{margin-left:8px}
  <label>Kwota (PLN) <input name="amount" type="number" min="0.01" max="999999999.99" step="0.01" required></label>
  <button>Zatwierdź finansowanie</button>
 </form>
-<p id="moneyStatus" role="status"></p>
+<section id="companyLoanBox" hidden><h3>Kredyt firmowy podwykonawcy</h3><p id="companyLoanDetails"></p><form id="companyLoanForm"><label>Kwota (zł) <input name="amount" type="number" min="0.01" max="500000" step="0.01" required></label><button type="submit">Weź kredyt</button></form><p id="companyLoanStatus" role="status"></p></section><p id="moneyStatus" role="status"></p>
 <h2 id="vehicleRequests">Wniosek o zakup lub leasing</h2>
 <form id="vehicleRequest" class="grid">
  <label>Pojazd <select name="kind"><option value="truck">Ciągnik</option><option value="trailer">Naczepa</option></select></label>
@@ -343,7 +343,22 @@ else{
    for(const key of ['balanceCents','incomeCents','costCents']){
     get(key).textContent=budget[key]===null?'Brak budżetu startowego':money(budget[key]);
    }
-   repay=budget.loanRemainingCents>0;
+   const partner=budget.companyId!=='nowaczyk';
+   const loanBox=get('companyLoanBox'),loanForm=get('companyLoanForm');
+   loanBox.hidden=!partner;
+   if(partner){
+    const startupDebt=budget.fundingSource==='credit'&&budget.loanRemainingCents>0;
+    const companyDebt=budget.loanRemainingCents>0&&!startupDebt;
+    loanForm.hidden=startupDebt;
+    get('companyLoanDetails').textContent=startupDebt?'Najpierw spłać kredyt startowy.':companyDebt?'Pozostało do spłaty: '+money(budget.loanRemainingCents):'Kredyt firmowy bez odsetek, maksymalnie 500 000 zł. Jeden aktywny kredyt.';
+    loanForm.querySelector('button').textContent=companyDebt?'Spłać kredyt':'Weź kredyt';
+    loanForm.onsubmit=async event=>{
+     event.preventDefault();const button=loanForm.querySelector('button');button.disabled=true;
+     try{await api('/api/company/loan','POST',{action:companyDebt?'repay':'borrow',amount:String(new FormData(loanForm).get('amount'))});loanForm.reset();get('companyLoanStatus').textContent='Zapisano operację kredytową.';await refreshMoney()}
+     catch(e){get('companyLoanStatus').textContent=e.message}finally{button.disabled=false}
+    };
+   }
+   repay=budget.fundingSource==='credit'&&budget.loanRemainingCents>0;
    mainLoan=budget.companyId==='nowaczyk';
    financeForm.hidden=!mainLoan&&budget.locked&&!repay;
    financeForm.elements.source.closest('label').hidden=repay||mainLoan;
