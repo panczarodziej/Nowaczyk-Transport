@@ -484,6 +484,27 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   return send(res,200,{events,source:'unverified-client',lastId:events.at(-1)?.id||since});
  }
  // Rejestr naczep: osobny zasób, możliwy przydział również podwykonawcy.
+ if(u.pathname==='/api/vehicles/reregister'&&method==='POST'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy może przerejestrować pojazd.'});
+  const a=await body(req),kind=str(a.kind,20),id=str(a.id,80),plate=str(a.plate,30).toUpperCase().replace(/\s+/g,' ').trim();
+  if(!['truck','trailer'].includes(kind))return send(res,400,{error:'Wybierz ciężarówkę lub naczepę.'});
+  const list=kind==='truck'?(db.fleet||[]):(db.trailers||[]);
+  const vehicle=list.find(v=>v.id===id);
+  if(!vehicle)return send(res,404,{error:'Nie znaleziono pojazdu.'});
+  const ownerId=kind==='truck'?vehicle.companyId:vehicle.ownerCompanyId;
+  if(!auth(req)&&ownerId!==who(req).companyId)return send(res,403,{error:'Możesz zmieniać tylko rejestracje swojej firmy.'});
+  const normalize=v=>String(v||'').toUpperCase().replace(/[\s-]/g,'');
+  if(!/^[A-Z0-9][A-Z0-9 -]{2,14}$/.test(plate)||normalize(plate)===normalize(vehicle.plate))return send(res,400,{error:'Wpisz inną, poprawną rejestrację.'});
+  if((db.fleet||[]).some(v=>(v.id!==id||kind!=='truck')&&normalize(v.plate)===normalize(plate))||
+     (db.trailers||[]).some(v=>(v.id!==id||kind!=='trailer')&&normalize(v.plate)===normalize(plate)))
+    return send(res,409,{error:'Ta rejestracja jest już przypisana do innego pojazdu.'});
+  const oldPlate=vehicle.plate,now=new Date().toISOString();
+  (vehicle.registrationHistory??=[]).push({from:oldPlate,to:plate,at:now,by:who(req).username});
+  Object.assign(vehicle,{previousPlate:oldPlate,plate,registeredAt:now,registeredBy:who(req).username});
+  if(kind==='truck')vehicle.trailerPlate=vehicle.trailerPlate||'';
+  else for(const truck of db.fleet||[])if(normalize(truck.trailerPlate)===normalize(oldPlate))truck.trailerPlate=plate;
+  await save(db);return send(res,200,{ok:true,id,kind,plate,previousPlate:oldPlate});
+ }
  if(u.pathname==='/api/trailers'&&method==='GET'){
   const me=who(req);if(!me)return send(res,401,{error:'Zaloguj się'});
   const list=db.trailers||[];
