@@ -11,7 +11,7 @@ header{background:#223242;color:white;padding:22px 5%;font-weight:700}
 main{max-width:1100px;margin:auto;padding:32px 20px}
 a{color:#12568c;text-decoration:none}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
-article{background:white;border:1px solid #d1dfee;border-radius:14px;padding:22px;box-shadow:0 3px 12px #182c430c}#companySettings article{border-left:4px solid #17698e}#companySettings details{background:#f8fbfd;border:1px solid #dce7ef;border-radius:10px;padding:14px;margin:14px 0}#companySettings summary{font-weight:700;cursor:pointer}#companySettings h3{margin-top:26px;border-bottom:1px solid #dce7ef;padding-bottom:9px}#companySettings button{background:#146587;color:white;border:0;border-radius:7px;cursor:pointer}#companySettings button:hover{background:#0b4d6d}.partner-finance{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:15px 0}.partner-finance>div{background:#eef5fa;border-radius:10px;padding:14px}.partner-finance strong{display:block;font-size:20px;margin-top:6px}.partner-loan{border:1px solid #cbdfea;border-radius:10px;padding:14px;margin:15px 0;background:#f8fbfe}.partner-loan a{font-weight:700}
+article{background:white;border:1px solid #d1dfee;border-radius:14px;padding:22px;box-shadow:0 3px 12px #182c430c}#companySettings article{border-left:4px solid #17698e}#companySettings details{background:#f8fbfd;border:1px solid #dce7ef;border-radius:10px;padding:14px;margin:14px 0}#companySettings summary{font-weight:700;cursor:pointer}#companySettings h3{margin-top:26px;border-bottom:1px solid #dce7ef;padding-bottom:9px}#companySettings button{background:#146587;color:white;border:0;border-radius:7px;cursor:pointer}#companySettings button:hover{background:#0b4d6d}#companySettings button.remove-company{background:#a8323a;margin-top:20px}#companySettings button.remove-company:hover{background:#81242b}.partner-finance{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:15px 0}.partner-finance>div{background:#eef5fa;border-radius:10px;padding:14px}.partner-finance strong{display:block;font-size:20px;margin-top:6px}.partner-loan{border:1px solid #cbdfea;border-radius:10px;padding:14px;margin:15px 0;background:#f8fbfe}.partner-loan a{font-weight:700}
 article h2{font-size:16px;margin:0 0 12px;color:#52687f}
 article strong{font-size:27px}
 [hidden]{display:none!important}
@@ -332,6 +332,19 @@ async function loadCompanies(){
   const save=element('button','Zapisz bazy');save.onclick=()=>action(save,()=>update({bases:bases.value.split(',')}));
   const recruitment=element('button',company.open?'Zamknij rekrutację':'Otwórz rekrutację');recruitment.onclick=()=>action(recruitment,()=>update({open:!company.open}));
   card.append(logoLabel,basesLabel,save,recruitment);
+  if(partners&&manager){
+   const remove=element('button','Usuń firmę podwykonawczą');
+   remove.type='button';remove.className='remove-company';
+   remove.onclick=async()=>{
+    const confirmed=prompt('Usuwanie firmy '+company.name+'. Wpisz dokładną nazwę firmy, aby potwierdzić. Konta firmy zostaną zablokowane, a historia finansów i tras pozostanie w archiwum.');
+    if(confirmed===null)return;
+    if(confirmed!==company.name){get('settingsStatus').textContent='Nazwa firmy nie zgadza się. Nie usunięto.';return}
+    remove.disabled=true;
+    try{await api('/api/admin/companies','DELETE',{id:company.id,confirmName:confirmed});get('settingsStatus').textContent='Firma '+company.name+' została usunięta z aktywnych podwykonawców.';await loadCompanies()}
+    catch(error){get('settingsStatus').textContent=error.message;remove.disabled=false}
+   };
+   card.append(remove);
+  }
   const budget=budgets.find(b=>b.companyId===company.id);
   if(budget?.locked)card.append(element('p','Saldo · '+money(budget.balanceCents)+' · Wydatki · '+money(budget.costCents)+' · Budżet startowy · '+money(budget.initialCents)));
   if(budget&&!budget.locked&&budget.canSetInitialBudget){
