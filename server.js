@@ -543,7 +543,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   let entries;
   if(pool){const q=await pool.query('SELECT company_id,initial_cents,locked_at FROM ks_company_budget');entries=q.rows.map(x=>({companyId:x.company_id,initialCents:Number(x.initial_cents),lockedAt:x.locked_at}))}
   else entries=Object.entries(db.initialBudgets||{}).map(([companyId,x])=>({companyId,...x}));
-  const budgets=(db.companies||[]).filter(c=>!mine||c.id===who(req).companyId).map(c=>{
+  const budgets=(db.companies||[]).filter(c=>!c.archivedAt&&(!mine||c.id===who(req).companyId)).map(c=>{
    const funding=db.startupFinance?.[c.id];
    const b=entries.find(x=>x.companyId===c.id)||funding;
    const {income,costs}=companyCashFlow(db,c.id);
@@ -979,7 +979,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/admin/subcontractor-mileage'&&method==='GET'){
   if(!auth(req))return send(res,403,{error:'Tylko główny szef lub administrator'});
-  const partners=(db.companies||[]).filter(c=>c.id!==MAIN_COMPANY_ID);
+  const partners=(db.companies||[]).filter(c=>c.id!==MAIN_COMPANY_ID&&!c.archivedAt);
   const items=partners.map(company=>{
    const routes=(db.routes||[]).filter(r=>r.companyId===company.id);
    const completed=routes.filter(r=>r.settledAt||r.deliveredAt||r.status==='Zakończona');
@@ -999,7 +999,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    completedKm:Math.round(items.reduce((sum,x)=>sum+x.completedKm,0)*10)/10,
    completedRoutes:items.reduce((sum,x)=>sum+x.completedRoutes,0)}});
  }
- if(u.pathname==='/api/companies'&&method==='GET')return send(res,200,db.companies.map(({id,name,bases,open,logo})=>({id,name,bases,open,logo})));
+ if(u.pathname==='/api/companies'&&method==='GET')return send(res,200,db.companies.filter(c=>!c.archivedAt).map(({id,name,bases,open,logo})=>({id,name,bases,open,logo})));
  if(u.pathname==='/api/applications'&&method==='POST'){
   if(!rate(req,'apply',5))return send(res,429,{error:'Za dużo prób. Spróbuj później.'});
   const a=await body(req),c=db.companies.find(x=>x.id===a.companyId&&x.open);
