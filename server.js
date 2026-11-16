@@ -1434,7 +1434,19 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const cutoff=Date.now()-24*60*60*1000;
    return send(res,200,db.applications.filter(x=>(!recruiter||x.companyId===who(req).companyId)&&(x.status!=='Przyjęte'||!(Date.parse(x.acceptedAt||x.date)<=cutoff))));
   }
-  if(u.pathname==='/api/admin/companies'&&method==='GET')return send(res,200,subcontractorCompanySettings?db.companies.filter(company=>company.id===who(req).companyId):db.companies);
+  if(u.pathname==='/api/admin/companies'&&method==='GET')return send(res,200,db.companies.filter(company=>!company.archivedAt&&(!subcontractorCompanySettings||company.id===who(req).companyId)));
+  if(u.pathname==='/api/admin/companies'&&method==='DELETE'){
+   if(!auth(req))return send(res,403,{error:'Tylko główny szef może usunąć firmę podwykonawczą.'});
+   const a=await body(req),company=db.companies.find(c=>c.id===a.id&&!c.archivedAt);
+   if(!company)return send(res,404,{error:'Nie znaleziono aktywnej firmy.'});
+   if(company.id===MAIN_COMPANY_ID||company.id===LEGACY_COMPANY_ID)return send(res,403,{error:'Nie można usunąć firmy głównej.'});
+   if(a.confirmName!==company.name)return send(res,400,{error:'Potwierdź usunięcie dokładną nazwą firmy.'});
+   company.archivedAt=new Date().toISOString();company.open=false;
+   for(const account of db.accounts||[]){
+    if(account.companyId===company.id){account.active=false;revokeAccountSessions(db,account.id)}
+   }
+   await save(db);return send(res,200,{ok:true,companyId:company.id,archived:true});
+  }
   if(u.pathname==='/api/admin/applications'&&method==='PATCH'){
    const a=await body(req),x=db.applications.find(x=>x.id===a.id);
    if(!x||(recruiter&&x.companyId!==who(req).companyId))return send(res,404,{error:'Nie znaleziono podania'});
