@@ -166,6 +166,26 @@ function renderManagement(card,company,data,user){
   credit.append(element('p',pending.length?'Oczekujące wnioski: '+pending.map(r=>money(r.amountCents)).join(', '):'Brak oczekujących wniosków kredytowych.'));
   const link=element('a','Otwórz wnioski i rozpatrz kredyty');link.href='/wnioski.html';credit.append(link);card.append(credit);
  }
+ card.append(element('h3','Przerejestrowanie pojazdów i naczep'));
+ if(vehicles.length){
+  const form=element('form'),label=element('label','Wybierz pojazd '),select=element('select');
+  for(const v of data.fleet){const option=element('option','Ciężarówka · '+v.model+' · '+v.plate);option.value='truck:'+v.id;select.append(option)}
+  for(const v of data.trailers){const option=element('option','Naczepa · '+v.model+' · '+v.plate);option.value='trailer:'+v.id;select.append(option)}
+  label.append(select);
+  const plateLabel=element('label','Nowa rejestracja '),plate=element('input');plate.required=true;plate.maxLength=15;plate.placeholder='np. KRA 12345';plateLabel.append(plate);
+  const button=element('button','Przerejestruj');button.type='submit';
+  const status=element('p');status.setAttribute('role','status');
+  form.append(label,plateLabel,button,status);
+  form.onsubmit=async event=>{
+   event.preventDefault();
+   const [kind,id]=select.value.split(':');
+   if(!confirm('Zmienić rejestrację wybranego pojazdu na '+plate.value.toUpperCase()+'?'))return;
+   button.disabled=true;
+   try{await api('/api/vehicles/reregister','POST',{kind,id,plate:plate.value});status.textContent='Rejestracja zmieniona. Odświeżam listę.';await loadCompanies()}
+   catch(error){status.textContent=error.message;button.disabled=false}
+  };
+  card.append(form);
+ }else card.append(element('p','Brak pojazdów do przerejestrowania.'));
  card.append(element('h3','Flota firmy'));
  const list=element('ul');
  for(const vehicle of vehicles)list.append(element('li',[vehicle.model,vehicle.plate,vehicle.driverUsername||vehicle.assigneeUsername].filter(Boolean).join(' · ')));
