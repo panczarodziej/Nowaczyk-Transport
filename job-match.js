@@ -1,7 +1,10 @@
 "use strict";
 // Read-only validation of a received ETS2 job against a dispatch order.
-function norm(s){return String(s??'').normalize('NFKC').trim().toLocaleLowerCase('pl').replace(/\s+/g,' ')}
+function norm(s){return String(s??'').normalize('NFKC').trim().toLocaleLowerCase('pl').normalize('NFD').replace(/\p{Diacritic}/gu,'').replace(/ł/g,'l').replace(/\s+/g,' ')}
 const polishNames=require('./public/ets2-polish-names.json');
+const catalog=require('./public/ets2-catalog.json');
+const cityAliases=new Map();
+for(const group of [catalog.europe,catalog.poland,catalog.middleEast])for(const [id,[label]] of Object.entries(group))cityAliases.set(norm(label),norm(id));
 const companyAliases=require('./ets2-company-aliases.json');
 function comparable(value,field){
  const aliases=field==='cargo'?polishNames.cargo:field==='from'||field==='to'?polishNames.cities:null;
@@ -11,7 +14,8 @@ function comparable(value,field){
   return Object.hasOwn(companyAliases,company)?companyAliases[company]:key;
  }
  const alias=aliases&&Object.entries(aliases).find(([label])=>norm(label)===key);
- return alias?alias[1]:key;
+ const resolved=alias?norm(alias[1]):key;
+ return field==='from'||field==='to'?(cityAliases.get(resolved)||resolved):resolved;
 }
 function jobIdentityReasons(route,t){
  if(!route||!t||typeof t!=='object')return ['Brak danych zlecenia lub telemetrii'];
@@ -37,3 +41,4 @@ function validateJob(route,t){
  return {match:reasons.length===0,reasons,expectedTons:expected,actualTons:Number.isFinite(actual)?actual:null};
 }
 module.exports={validateJob,jobIdentityReasons};
+

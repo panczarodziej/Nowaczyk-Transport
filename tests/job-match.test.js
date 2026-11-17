@@ -7,3 +7,10 @@ assert.equal(validateJob(route,{...data,sourceCompany:'Inna firma'}).match,false
 assert.equal(validateJob(route,{...data,destinationCity:''}).match,false);
 assert.equal(validateJob(route,{...data,cargoMassKg:NaN}).match,false);
 console.log('5 testów zgodności zleceń: OK');
+
+
+// Display labels and the SDK identifiers name the same Polish cities.
+assert.equal(validateJob({...route,from:'Piotrków Trybunalski',to:'Września'},
+ {...data,sourceCity:'',destinationCity:'',sourceCityId:'piotrkowt',destinationCityId:'wrzesnia'}).match,true);
+assert.equal(validateJob({...route,from:'Ełk',to:'Augustów'},
+ {...data,sourceCity:'',destinationCity:'',sourceCityId:'elk',destinationCityId:'augustow'}).match,true);

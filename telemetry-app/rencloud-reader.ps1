@@ -24,6 +24,15 @@ $lastDelivered=$false
 $lastLoaded=$false
 $hadValidSample=$false
 $lastJob=$null
+$checkpointAt=[DateTime]::MinValue
+$jobCheckpoint=Join-Path $logDir 'active-job.json'
+try {
+ if(Test-Path $jobCheckpoint) {
+  $saved=Get-Content $jobCheckpoint -Raw | ConvertFrom-Json
+  $lastJob=@{}
+  foreach($property in $saved.PSObject.Properties){$lastJob[$property.Name]=$property.Value}
+ }
+} catch { $lastJob=$null }
 # Nie tworz fikcyjnego zaladunku po samym starcie czytnika.
 # Dostawa musi byc potwierdzona flaga z pluginu.
 
@@ -59,7 +68,7 @@ while($true) {
   $loaded=$onJob -and ($b[1564] -ne 0)
   $event=''
   if($loaded -and -not $lastLoaded){$event='job-started'}
-  if($hadValidSample -and $delivered -and -not $lastDelivered){$event='job-delivered'}
+  if(($hadValidSample -or $lastJob) -and $delivered -and -not $lastDelivered){$event='job-delivered'}
   $payload=@{
    speedKmh=[math]::Round($speed,2)
    cargoMassKg=[math]::Round([math]::Max(0,$cargoMass),1)
@@ -83,7 +92,14 @@ while($true) {
    paused=($b[4] -ne 0)
    event=$event
   }
-  if($onJob -and $payload.cargo) { $lastJob=$payload.Clone() }
+  if($onJob -and $payload.cargo -and -not $delivered) {
+   $lastJob=$payload.Clone()
+   if($event -eq 'job-started' -or ((Get-Date)-$checkpointAt).TotalSeconds -ge 10) {
+    $lastJob | ConvertTo-Json -Compress | Set-Content -Path ($jobCheckpoint+'.tmp') -Encoding UTF8
+    Move-Item -Path ($jobCheckpoint+'.tmp') -Destination $jobCheckpoint -Force
+    $checkpointAt=Get-Date
+   }
+  }
   if($event -eq 'job-delivered') {
    $distance=F32 $b 1460
    if($distance -gt 0 -and $distance -le 100000){$payload.jobDeliveredDistanceKm=$distance}
@@ -99,9 +115,10 @@ while($true) {
   $hadValidSample=$true
   $lastDelivered=$delivered
   $lastLoaded=$loaded
-  if($event -eq 'job-delivered'){$lastJob=$null}
+  if($event -eq 'job-delivered'){$lastJob=$null;Remove-Item $jobCheckpoint -ErrorAction SilentlyContinue}
  } catch {
   Report ("Blad odczytu/wysylki: " + $_.Exception.Message)
  }
  Start-Sleep -Milliseconds 200
 }
+

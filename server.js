@@ -782,12 +782,18 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   }
   const deliveredDistance=a.jobDeliveredDistanceKm;
   telemetry.jobDeliveredDistanceKm=Number.isFinite(deliveredDistance)&&deliveredDistance>0&&deliveredDistance<=100000?deliveredDistance:null;
-  const candidates=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===(me.companyId||MAIN_COMPANY_ID)&&r.status!=='Zakończona');
+  const candidates=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===(me.companyId||MAIN_COMPANY_ID)&&!r.deliveredAt&&!r.settledAt&&r.status!=='Zakończona');
   const checks=candidates.map(r=>({routeId:r.id,...validateJob(r,telemetry)}));
   const matches=candidates.filter(r=>r.acceptedAt&&checks.find(check=>check.routeId===r.id).match);
-  const route=matches.length===1?matches[0]:null;
+  let route=matches.length===1?matches[0]:null;
   const mileageMatches=candidates.filter(r=>r.acceptedAt&&!r.deliveredAt&&jobIdentityReasons(r,telemetry).length===0);
-  const mileageRoute=mileageMatches.length===1?mileageMatches[0]:null;
+  // Reuse the started order when the driver has several identical dispatches.
+  const started=db.telemetryEvents.findLast(e=>e.driver===driver&&e.companyId===(me.companyId||MAIN_COMPANY_ID)&&e.type==='job-started'&&mileageMatches.some(r=>r.id===(e.mileageRouteId||e.routeId)));
+  const active=mileageMatches.filter(r=>r.status==='W trasie');
+  const mileageRoute=mileageMatches.length===1?mileageMatches[0]:
+   started?mileageMatches.find(r=>r.id===(started.mileageRouteId||started.routeId)):
+   active.length===1?active[0]:type==='job-started'?mileageMatches.slice().sort((a,b)=>String(a.acceptedAt).localeCompare(String(b.acceptedAt))||String(a.id).localeCompare(String(b.id)))[0]||null:null;
+  if(mileageRoute&&checks.find(c=>c.routeId===mileageRoute.id)?.match)route=mileageRoute;
   const event={id:crypto.randomUUID(),eventKey,driver,companyId:me.companyId||MAIN_COMPANY_ID,type,telemetry,routeId:route?.id||null,mileageRouteId:mileageRoute?.id||null,matchStatus:route?'matched':'unmatched',checks,verified:false,settlementAllowed:false,receivedAt:new Date().toISOString()};
   if(mileageRoute?.status==='Przyjęta'&&type==='job-started')mileageRoute.status='W trasie';
   if(mileageRoute&&type==='job-delivered'){
@@ -1532,3 +1538,4 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
 }catch(e){if(res.destroyed)return;console.error(e);if(!res.headersSent)send(res,500,{error:'Błąd serwera'})}finally{release?.()}});
 async function financeTick(){const previous=mutationTail;let release;mutationTail=new Promise(resolve=>{release=resolve});await previous;try{const db=await load();if(pool){const budgets=await pool.query('SELECT company_id,initial_cents FROM ks_company_budget');db.initialBudgets=Object.fromEntries(budgets.rows.map(x=>[x.company_id,{initialCents:Number(x.initial_cents)}]))}if(fleetFinance.processDue(db))await save(db)}catch(error){console.error('Finanse floty:',error)}finally{release()}}
 initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>{console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT);financeTick();setInterval(financeTick,60*60*1000).unref()})).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
+

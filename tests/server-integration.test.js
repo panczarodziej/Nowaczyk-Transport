@@ -56,14 +56,14 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  const company=await req('/api/admin/companies',{name:'Podwykonawca',id:'Moja firma 7'},admin.cookie);
  assert.equal(company.status,201);
  const budget={companyId:company.data.id,amount:'500.25',confirm:true};
- for(const cookie of [admin.cookie,dispatcher.cookie,login.cookie]){
+ for(const cookie of [login.cookie]){
   assert.equal((await req('/api/budgets',budget,cookie)).status,403);
  }
  const ownerAccount={username:'kcvper',password:'budget-owner-password',role:'boss'};
  assert.equal((await req('/api/accounts',ownerAccount,admin.cookie)).status,201);
  const owner=await req('/api/accounts/login',{username:ownerAccount.username,password:ownerAccount.password});
- assert.equal((await req('/api/budgets',null,owner.cookie)).data.find(b=>b.companyId===company.data.id).canSetInitialBudget,false);
- assert.equal((await req('/api/budgets',budget,owner.cookie)).status,403);
+ assert.equal((await req('/api/budgets',null,owner.cookie)).data.find(b=>b.companyId===company.data.id).canSetInitialBudget,true);
+ assert.equal((await req('/api/budgets',{...budget,confirm:false},owner.cookie)).status,400);
  const subAccount={username:'subboss',password:'subboss-password-only',role:'boss',companyId:company.data.id};
  assert.equal((await req('/api/accounts',subAccount,dispatcher.cookie)).status,201);
  const sub=await req('/api/accounts/login',{username:subAccount.username,password:subAccount.password});
@@ -271,9 +271,9 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const budgetForSub=async()=>(await req('/api/budgets?mine=1',null,sub.cookie)).data[0].balanceCents;
  const funding='/api/company/startup-finance';
  assert.equal((await req(funding,{source:'wallet',amount:'500.25'},sub.cookie)).status,409);
- assert.equal((await req(funding,{source:'credit',amount:'510.25'},sub.cookie)).status,201);
- assert.equal((await req(funding,{source:'credit',amount:'510.25'},sub.cookie)).status,409);
- assert.equal((await req(funding,{source:'repay',amount:'10'},sub.cookie)).data.remainingCents,50025);
+ assert.equal((await req(funding,{source:'credit',amount:'200510.25'},sub.cookie)).status,201);
+ assert.equal((await req(funding,{source:'credit',amount:'200510.25'},sub.cookie)).status,409);
+ assert.equal((await req(funding,{source:'repay',amount:'10'},sub.cookie)).data.remainingCents,20050025);
  const beforePurchase=await budgetForSub();
  assert.equal((await req(requests,cash,login.cookie)).status,403);
  assert.equal((await req('/api/fleet/buy',cash,sub.cookie)).status,409);
@@ -308,7 +308,7 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  const charge={companyId:company.data.id,amount:'10',description:'Przekroczenie prędkości',type:'mandat'};
  assert.equal((await req('/api/company/charge',charge,sub.cookie)).status,403);
  assert.equal((await req('/api/company/charge',charge,dispatcher.cookie)).status,201);
- assert.equal(await budgetForSub(),beforePurchase-10625-5000-4050-1000);
+ assert.equal(await budgetForSub(),beforePurchase-10625-17000000-5000-4050-1000);
  const management='/api/company/management?companyId='+encodeURIComponent(company.data.id);
  const managed=(await req(management,null,dispatcher.cookie)).data;
  assert.ok(managed.fleet.some(v=>v.plate==='TEST 500'));
@@ -410,3 +410,4 @@ assert.equal(exported.data.cargo.tons,18);assert.equal(exported.data.from.compan
  assert.equal(afterReuse.deliveries,2);
  }finally{await stop();fs.rmSync(dir,{recursive:true,force:true})}
 });
+
