@@ -121,3 +121,21 @@ przeglądarki nie blokuje już zalogowanego administratora. Nie zmieniono lokaln
 rejestrów starego centrum operacyjnego w dane online; do przydziału używaj
 „Trasy online”, a nie starych demonstracyjnych tabel.
 
+
+
+## Biuro zarządu
+
+`/biuro-zarzadu.html` jest dostępne wyłącznie dla szefów i administratora.
+Raport rozdziela saldo pieniężne od wyniku zarządczego: przychody pochodzą z dostaw,
+płace naliczają się według zapisanej stawki i kilometrów, a kredyty, zakup floty
+oraz kapitał leasingu nie zawyżają kosztów operacyjnych. Odsetki są wykazywane
+według terminów rat. Raport nie uwzględnia podatków ani amortyzacji.
+
+Pojazd jest zapisywany na trasie podczas jej przyjęcia w aplikacji. Starsze trasy
+bez takiego przypisania pozostają w wyniku firmy, ale nie są przypisywane do
+obecnego samochodu kierowcy. Dane można filtrować po miesiącu i eksportować CSV.
+Główny szef może przeglądać firmy; podwykonawca otrzymuje wyłącznie dane własnej.
+
+Plan serwisu nie obciąża salda. Dopiero zakończenie z kosztem rzeczywistym i numerem
+dokumentu zapisuje wydatek. Operacja jest odporna na podwójne wysłanie i odmawia
+pobrania kwoty, na którą firma nie ma środków. Terminy trafiają do powiadomień.

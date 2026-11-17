@@ -2,6 +2,7 @@
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {validateJob,jobIdentityReasons}=require('./job-match');
 const fleetFinance=require('./fleet-finance');
+const managementReport=require('./management-report');
 const PORT=Number(process.env.PORT||3000),ROOT=path.join(__dirname,'public'),DB=process.env.DATA_FILE||path.join(__dirname,'data.json');
 const password=process.env.ADMIN_PASSWORD;
 if(!password || password.length<12){console.error('Ustaw ADMIN_PASSWORD (min. 12 znaków) przed startem.');process.exit(1)}
@@ -259,7 +260,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/company/board','/api/company/maintenance','/api/company/maintenance/complete','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
     !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
@@ -334,6 +335,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(license.status!=='pending'&&manager&&id===me.companyId)add('license',license.createdAt+':'+id,license.status,'Licencja na naczepy · '+(license.status==='approved'?'zatwierdzono':'odrzucono'),license.decidedAt,'/firma.html#trailerLicense');
   }
   if(manager)for(const n of fleetFinance.notices(db,me.companyId))rows.push({id:'finance:'+n.id,label:n.label+' · '+n.due,at:n.at,url:n.url});
+  if(manager)for(const job of db.maintenance||[]){if(job.companyId===me.companyId&&job.status==='planned'&&Date.parse(job.due+'T00:00:00Z')<=Date.now()+7*86400000)add('maintenance',job.id,'planned','Serwis · '+job.plate+' · '+job.description,job.due+'T12:00:00Z','/biuro-zarzadu.html#service')}
   const reads=db.notificationReads?.[me.id]||[];
   if(method==='POST'){
    const a=await body(req);
@@ -387,6 +389,39 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const routes=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===companyId);
   const completed=routes.filter(r=>r.deliveredAt||r.status==='Zakończona');
   return send(res,200,{driver:me.username,companyId,km:Math.round(routes.reduce((n,r)=>n+(Number(r.drivenKm)||0),0)*10)/10,completedKm:Math.round(completed.reduce((n,r)=>n+(Number(r.drivenKm)||0),0)*10)/10,completedRoutes:completed.length,allRoutes:routes.length,source:'server',updatedAt:new Date().toISOString()});
+ }
+ if(u.pathname==='/api/company/board'&&method==='GET'){
+  if(!companyManager(req))return send(res,403,{error:'Biuro zarządu jest dostępne tylko dla szefów.'});
+  const companyId=u.searchParams.get('companyId')||who(req).companyId;
+  if(companyId!==who(req).companyId&&!auth(req))return send(res,403,{error:'Brak dostępu do firmy.'});
+  if(!(db.companies||[]).some(c=>c.id===companyId&&!c.archivedAt))return send(res,404,{error:'Nie znaleziono firmy.'});
+  const today=new Date().toLocaleDateString('sv-SE',{timeZone:'Europe/Warsaw'});
+  const month=u.searchParams.get('month')||today.slice(0,7);
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||month<'2000-01'||month>'2100-12')return send(res,400,{error:'Wybierz poprawny miesiąc.'});
+  if(pool){const result=await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId]);if(result.rows[0]){db.initialBudgets??={};db.initialBudgets[companyId]={initialCents:Number(result.rows[0].initial_cents)}}}
+  return send(res,200,managementReport.report(db,companyId,month,today,auth(req)&&companyId===MAIN_COMPANY_ID));
+ }
+ if(u.pathname==='/api/company/maintenance'&&method==='POST'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy.'});
+  const a=await body(req),companyId=who(req).companyId;
+  const vehicle=[...(db.fleet||[]),...(db.trailers||[])].find(v=>v.id===a.vehicleId&&(v.companyId||v.ownerCompanyId||MAIN_COMPANY_ID)===companyId);
+  const description=str(a.description,300),due=str(a.due,10),estimate=Number(a.estimate||0);
+  if(!vehicle||!description||!/^\d{4}-\d{2}-\d{2}$/.test(due)||!Number.isFinite(Date.parse(due))||new Date(due).toISOString().slice(0,10)!==due||!Number.isFinite(estimate)||estimate<0||estimate>1000000)return send(res,400,{error:'Wybierz własny pojazd, poprawny termin, opis i koszt planowany.'});
+  const item={id:crypto.randomUUID(),companyId,vehicleId:vehicle.id,plate:vehicle.plate,description,due,estimate:roundPLN(estimate),status:'planned',createdAt:new Date().toISOString(),createdBy:who(req).username};
+  (db.maintenance??=[]).push(item);await save(db);return send(res,201,item);
+ }
+ if(u.pathname==='/api/company/maintenance/complete'&&method==='POST'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy.'});
+  const a=await body(req),companyId=who(req).companyId,item=(db.maintenance||[]).find(x=>x.id===a.id&&x.companyId===companyId);
+  if(!item)return send(res,404,{error:'Nie znaleziono serwisu.'});
+  if(item.status==='completed')return send(res,200,{ok:true,duplicate:true,item});
+  const amount=Number(a.amount),invoiceNumber=str(a.invoiceNumber,100);
+  if(!Number.isFinite(amount)||amount<0||amount>1000000||(amount>0&&!invoiceNumber))return send(res,400,{error:'Podaj koszt rzeczywisty i numer faktury.'});
+  if(pool){const result=await pool.query('SELECT initial_cents FROM ks_company_budget WHERE company_id=$1',[companyId]);if(result.rows[0]){db.initialBudgets??={};db.initialBudgets[companyId]={initialCents:Number(result.rows[0].initial_cents)}}}
+  if(amount>0&&!fleetFinance.charge(db,companyId,roundPLN(amount),'maintenance:'+item.id,'Serwis: '+item.description,item.vehicleId))return send(res,409,{error:'Brak środków firmy na opłacenie serwisu.'});
+  Object.assign(item,{status:'completed',amount:roundPLN(amount),invoiceNumber,completedAt:new Date().toISOString(),completedBy:who(req).username});
+  const entry=(db.ledger||[]).find(e=>e.operationKey==='maintenance:'+item.id);if(entry)entry.invoiceNumber=invoiceNumber;
+  await save(db);return send(res,200,{ok:true,item});
  }
  if(u.pathname==='/api/company/summary'&&method==='GET'){
   if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Tylko kierownictwo i dyspozytorzy'});
@@ -844,6 +879,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(r.driver.toLowerCase()!==me.username.toLowerCase()||r.companyId!==(me.companyId||MAIN_COMPANY_ID))return send(res,403,{error:'To nie jest Twoja trasa'});
   if(r.acceptedAt)return send(res,200,{ok:true,duplicate:true,route:r});
   if(!['Przydzielona','W trasie'].includes(r.status))return send(res,409,{error:'Trasa nie oczekuje na przyjęcie'});
+  const assignedVehicle=(db.fleet||[]).find(v=>v.driverAccountId===me.id&&v.companyId===r.companyId);
+  if(assignedVehicle){r.vehicleId=assignedVehicle.id;r.vehiclePlate=assignedVehicle.plate}
   r.acceptedAt=new Date().toISOString();r.acceptedBy=me.username;r.acceptedVia='desktop';r.status='Przyjęta';await save(db);return send(res,200,{ok:true,route:r});
  }
  if(u.pathname==='/api/routes/export'&&method==='GET'){
@@ -980,7 +1017,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!canDispatch(req)&&(r.companyId!==who(req).companyId||(!isSubcontractorBoss(req)&&r.driver.toLowerCase()!==who(req).username.toLowerCase())))return send(res,403,{error:'To nie jest Twoja trasa'});
   if(!['Paliwo','Opłata drogowa','Parking','Inne'].includes(a.type))return send(res,400,{error:'Nieprawidłowy rodzaj kosztu'});
   const amount=Number(a.amount);if(!Number.isFinite(amount)||amount<=0||amount>1000000)return send(res,400,{error:'Nieprawidłowa kwota'});
-  const e={id:crypto.randomUUID(),routeId:r.id,companyId:r.companyId,driver:r.driver,type:a.type,country:str(a.country,80),from:str(a.from,120),to:str(a.to,120),place:str(a.place,120),liters:Number(a.liters)||0,amount,currency:'PLN',createdAt:new Date().toISOString()};
+  const e={id:crypto.randomUUID(),routeId:r.id,vehicleId:r.vehicleId||null,companyId:r.companyId,driver:r.driver,type:a.type,country:str(a.country,80),from:str(a.from,120),to:str(a.to,120),place:str(a.place,120),liters:Number(a.liters)||0,amount,currency:'PLN',createdAt:new Date().toISOString()};
   db.expenses??=[];db.expenses.push(e);await save(db);return send(res,201,e);
  }
  if(u.pathname==='/api/admin/subcontractor-mileage'&&method==='GET'){
@@ -1520,6 +1557,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/system.html' && !auth(req)){res.writeHead(302,{Location:homePath});return res.end()}
  if(['/driver.html','/moj-panel.html','/spedytor.html','/uzytkownicy.html','/trasy.html','/flota-online.html','/firma.html','/budzety.html','/ekonomia.html','/finanse-floty.html'].includes(u.pathname)){const me=who(req);if(!me){res.writeHead(302,{Location:'/system-login.html'});return res.end()}if(u.pathname==='/finanse-floty.html'&&!companyManager(req))return send(res,403,{error:'Tylko szef firmy'});if(u.pathname==='/budzety.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(['/flota-online.html','/firma.html'].includes(u.pathname)&&!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/uzytkownicy.html'&&!auth(req))return send(res,403,{error:'Tylko administrator'});if(u.pathname==='/spedytor.html'&&!canDispatch(req))return send(res,403,{error:'Tylko spedytor'});if(u.pathname==='/trasy.html'&&!canDispatch(req)&&!isSubcontractorBoss(req)){if(!canDrive(req))return send(res,403,{error:'Brak dostępu do zleceń'});res.writeHead(302,{Location:'/moj-panel.html#routes'});return res.end()}if(['/driver.html','/moj-panel.html'].includes(u.pathname)&&!canDrive(req))return send(res,403,{error:'Tylko kierowca'});}
+ if(u.pathname==='/biuro-zarzadu.html'&&!companyManager(req)){if(!who(req)){res.writeHead(302,{Location:'/system-login.html'});return res.end()}return send(res,403,{error:'Biuro zarządu jest dostępne tylko dla szefów.'})}
  let file=u.pathname==='/system.html'?'index.html':u.pathname==='/driver.html'?'moj-panel.html':u.pathname.slice(1);
  if(file==='podwykonawcy.html'){
   if(!auth(req))return send(res,403,{error:'Tylko główny szef lub administrator'});
