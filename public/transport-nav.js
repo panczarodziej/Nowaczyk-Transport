@@ -21,7 +21,7 @@
   ['/dokumenty.html','Dokumenty'],['/wnioski.html','Wnioski'],['/admin.html','Rekrutacja'],['/ekonomia.html','Ekonomia'],
   ['/firma.html#companyDrivers','Kierowcy'],['/moj-panel.html#settings','Ustawienia konta'],['/moj-panel.html','Panel kierowcy'],['/telemetry.html','Aplikacja Windows']
  ]:[
-  ...(user.dispatchAccess?[['/moj-panel.html','Mój panel']]:[]),['/spedytor.html','Dyspozytor'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],['/centrum-floty.html','Mapa kierowców']
+  ['/moj-panel.html','Mój panel'],['/spedytor.html','Dyspozytor'],['/gielda.html','Giełda'],['/trasy.html','Przydzielone trasy'],['/centrum-floty.html','Mapa kierowców']
  ];
  const menu=document.createElement('nav');
  menu.className='transport-nav persistent-menu';

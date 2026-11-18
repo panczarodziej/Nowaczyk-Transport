@@ -156,9 +156,10 @@ function hasDispatcherRole(account){
 function canDispatch(req){return auth(req)||hasDispatcherRole(who(req))}
 function canAssignRoutes(req){
  const me=who(req);
- return hasDispatcherRole(me)||me?.role==="boss"||isSubcontractorBoss(req);
+ return auth(req)||hasDispatcherRole(me)||isSubcontractorBoss(req);
 }
-function canDrive(req){return companyManager(req)||['driver','probation'].includes(who(req)?.role)}
+function canDrive(req){const me=who(req);return !!me?.active&&!me.deletedAt}
+function routeAssigneeAllowed(req,account){return !!account?.active&&!account.deletedAt&&(!isSubcontractorBoss(req)||account.companyId===who(req).companyId)}
 function companyManager(req){return auth(req)||isSubcontractorBoss(req)}
 function employee(account){return !account.deletedAt&&['driver','probation'].includes(account.role)}
 function drivingRoster(db){
@@ -167,7 +168,6 @@ function drivingRoster(db){
  return [...accounts.values()].filter(a=>{
   if(!a.active||a.deletedAt)return false;
   if(employee(a))return true;
-  if(!['admin','boss','subcontractor'].includes(a.role))return false;
   const name=a.username.toLowerCase();
   return assigned.has(a.id)||routed.has(a.companyId+':'+name)||db.fleetPositions?.[name]?.companyId===a.companyId;
  });
@@ -927,7 +927,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  if(u.pathname==='/api/routes/assignees'&&method==='GET'){
   if(!canDispatch(req)&&!isSubcontractorBoss(req))return send(res,403,{error:'Brak dostępu do listy kierowców'});
-  return send(res,200,[...accounts.values()].filter(a=>a.active&&(!isSubcontractorBoss(req)||a.companyId===who(req).companyId)&&(['admin','driver','probation'].includes(a.role)||(a.role==='boss'&&a.companyId===MAIN_COMPANY_ID)||a.id===who(req).id)).map(a=>a.username).sort());
+  return send(res,200,[...accounts.values()].filter(a=>routeAssigneeAllowed(req,a)).map(a=>a.username).sort());
  }
  if(u.pathname==='/api/routes/archive'&&method==='POST'){
   if(!canAssignRoutes(req))return send(res,403,{error:'Zleceniami zarządza główny szef lub dyspozytor.'});
@@ -958,7 +958,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const from=str(a.from,120),to=str(a.to,120),driver=str(a.driver,100);
   if(!from||!to||!driver)return send(res,400,{error:'Podaj kierowcę, początek i koniec trasy'});
   const account=accounts.get(driver.toLowerCase());
-  if(!account?.active||(isSubcontractorBoss(req)&&account.companyId!==who(req).companyId)||!(['admin','driver','probation'].includes(account.role)||(account.role==='boss'&&account.companyId===MAIN_COMPANY_ID)||account.id===who(req).id))return send(res,400,{error:'Wybierz aktywne konto z listy kierowców'});
+  if(!routeAssigneeAllowed(req,account))return send(res,400,{error:'Wybierz aktywne konto z listy odbiorców trasy.'});
   const plannedKm=Number(a.plannedKm);
   if(!Number.isFinite(plannedKm)||plannedKm<0||plannedKm>20000)return send(res,400,{error:'Nieprawidłowy dystans'});
   const emptyKm=Number(a.emptyKm??0);

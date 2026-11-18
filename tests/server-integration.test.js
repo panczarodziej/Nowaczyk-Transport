@@ -147,7 +147,8 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.equal((await req('/api/trailers',null,admin.cookie)).data.trailers.filter(t=>t.assigneeId===boss.id).length,2);
  assert.equal((await req('/api/routes',route)).status,401);
  assert.equal((await req('/api/routes',route,login.cookie)).status,403);
- assert.equal((await req('/api/routes',route,admin.cookie)).status,403);
+ const adminAssigned=await req('/api/routes',route,admin.cookie);assert.equal(adminAssigned.status,201);
+ assert.equal((await req('/api/routes/archive',{id:adminAssigned.data.id},admin.cookie)).status,200);
  const trainee={...route,driver:'subdriver'};
  assert.equal((await req('/api/accounts/update',{username:trainee.driver,role:'probation',dispatchAccess:true},admin.cookie)).data.dispatchAccess,true);
  const temporary=await req('/api/routes',trainee,subDriver.cookie);
