@@ -36,10 +36,11 @@ function applicationCard(app){
   }catch{}
  }
  card.append(details);
+ if(app.decidedAt)card.append(element('p','Decyzja: '+new Date(app.decidedAt).toLocaleString('pl-PL')+(app.decidedBy?' · '+app.decidedBy:'')));
  async function update(button,fields){
-  button.disabled=true;get('error').textContent='';
+  const buttons=[...card.querySelectorAll('button,select')];buttons.forEach(control=>control.disabled=true);get('error').textContent='';
   try{await api('/api/admin/applications','PATCH',{id:app.id,...fields});await loadApplications()}
-  catch(error){get('error').textContent=error.message;button.disabled=false}
+  catch(error){get('error').textContent=error.message;buttons.forEach(control=>control.disabled=false)}
  }
  if(!recruiter){
   const label=element('label','Firma '),select=element('select','');
@@ -48,15 +49,15 @@ function applicationCard(app){
   select.onchange=()=>{const companyId=select.value;select.value=app.companyId;void update(select,{companyId})};
   label.append(select);card.append(label);
  }
- const actions=recruiter?(app.status==='Nowe'?['Przyjęte']:[]):statuses.slice(1).filter(status=>status!==app.status);
+ const actions=recruiter?(app.status==='Nowe'?['Przyjęte','Odrzucone']:[]):statuses.slice(1).filter(status=>status!==app.status);
  for(const status of actions){
   const button=element('button',status==='Przyjęte'?'Przyjmij':'Odrzuć');
-  button.onclick=()=>update(button,{status});card.append(button);
+  button.type='button';if(status==='Odrzucone')button.style.background='#a83c45';button.onclick=()=>update(button,{status});card.append(button);
  }
  return card;
 }
 function render(){
- const tabs=recruiter?statuses.slice(0,2):statuses;
+ const tabs=statuses;
  get('applicationTabs').replaceChildren(...tabs.map(status=>{
   const count=applications.filter(app=>app.status===status).length;
   const button=element('button',status+' ('+count+')');

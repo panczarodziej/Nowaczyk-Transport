@@ -113,7 +113,7 @@ test('login → dispatch → nested export → telemetry → driver panel and de
  assert.deepEqual((await req('/api/admin/applications',null,sub.cookie)).data.map(a=>a.id),[own.data.id]);
  const acceptApplication=(id,status)=>fetch(base+'/api/admin/applications',{method:'PATCH',headers:{Cookie:sub.cookie,'Content-Type':'application/json'},body:JSON.stringify({id,status})});
  assert.equal((await acceptApplication(foreign.data.id,'Przyjęte')).status,404);
- assert.equal((await acceptApplication(own.data.id,'Odrzucone')).status,403);
+ assert.equal((await acceptApplication(own.data.id,'Nowe')).status,403);
  assert.equal((await acceptApplication(own.data.id,'Przyjęte')).status,200);
  const lamp=await req('/api/economy/lights',{name:'Lampa LED',unitPrice:12.34,quantity:3},login.cookie);
  assert.equal(lamp.status,201);

@@ -316,8 +316,8 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    }
   }
   for(const a of db.applications||[]){
-   if(a.applicantId===me.id&&a.status!=='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.companyName+' · '+a.status,a.acceptedAt||a.date,'/rekrutacja.html#myApplications');
-   if(manager&&scope(a.companyId)&&a.status==='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.fullname+' · '+companyName(a.companyId),a.date,'/admin.html',{kind:'job',id:a.id,details:[a.discord,a.age!=null?'Wiek: '+a.age:'',a.hours!=null?'ETS2: '+a.hours+' h':'',a.experience,a.availability,a.reason].filter(Boolean),acceptOnly:!auth(req)});
+   if(a.applicantId===me.id&&a.status!=='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.companyName+' · '+a.status,a.decidedAt||a.acceptedAt||a.date,'/rekrutacja.html#myApplications');
+   if(manager&&scope(a.companyId)&&a.status==='Nowe')add('job',a.id,a.status,'Podanie o pracę · '+a.fullname+' · '+companyName(a.companyId),a.date,'/admin.html',{kind:'job',id:a.id,details:[a.discord,a.age!=null?'Wiek: '+a.age:'',a.hours!=null?'ETS2: '+a.hours+' h':'',a.experience,a.availability,a.reason].filter(Boolean),acceptOnly:false});
   }
   for(const r of db.vehicleRequests||[]){
    const label=(r.kind==='trailer'?'Naczepa':'Ciągnik')+' · '+r.model;
@@ -1529,11 +1529,11 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(u.pathname==='/api/admin/applications'&&method==='PATCH'){
    const a=await body(req),x=db.applications.find(x=>x.id===a.id);
    if(!x||(recruiter&&x.companyId!==who(req).companyId))return send(res,404,{error:'Nie znaleziono podania'});
-   if(recruiter&&(a.status!=='Przyjęte'||x.status!=='Nowe'||Object.hasOwn(a,'companyId')))return send(res,403,{error:'Możesz przyjąć tylko nowe podanie do własnej firmy.'});
+   if(recruiter&&(!['Przyjęte','Odrzucone'].includes(a.status)||(x.status!=='Nowe'&&x.status!==a.status)||Object.hasOwn(a,'companyId')))return send(res,403,{error:'Możesz przyjąć lub odrzucić nowe podanie wyłącznie do własnej firmy.'});
    if(a.status&&!['Nowe','Przyjęte','Odrzucone'].includes(a.status))return send(res,400,{error:'Niepoprawny status'});
    if(a.companyId&&!db.companies.some(c=>c.id===a.companyId))return send(res,400,{error:'Nieznana firma'});
    if(a.status&&x.status!==a.status){
-    x.status=a.status;
+    x.status=a.status;x.decidedAt=new Date().toISOString();x.decidedBy=who(req).username;
     if(a.status==='Przyjęte')x.acceptedAt=new Date().toISOString();
     else delete x.acceptedAt;
    }
