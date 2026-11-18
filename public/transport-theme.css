@@ -1,0 +1,40 @@
+/* Shared palette, loaded before page content to prevent a light flash. */
+html[data-theme=light]{color-scheme:light;--nt-bg:#edf2f6;--nt-surface:#fff;--nt-raised:#f5f8fa;--nt-ink:#183046;--nt-muted:#50677b;--nt-line:#d8e3eb;--nt-link:#146587;--nt-input:#fff;--nt-header:#073751}
+html[data-theme=dark]{color-scheme:dark;--nt-bg:#101820;--nt-surface:#192630;--nt-raised:#223440;--nt-ink:#e2ebf2;--nt-muted:#a7bac8;--nt-line:#354b5b;--nt-link:#82c9eb;--nt-input:#13212b;--nt-header:#092b40}
+html[data-theme]{--transport-bg:var(--nt-bg);--transport-ink:var(--nt-ink);--transport-muted:var(--nt-muted);--transport-line:var(--nt-line);--transport-row:var(--nt-raised);background:var(--nt-bg)!important;color:var(--nt-ink)}
+html[data-theme] body{background:var(--nt-bg)!important;color:var(--nt-ink)!important}
+html[data-theme] :is(.panel,.card,.box,.stat,.kpi,.filters,article,.partner-loan,.reconciliation>div,.summary>div,.transport-modules a,.nav,dialog,.notice,.service-form,.empty,.tag,.badge,.pill,.tacho-modes label,body[data-view=firma] article,body[data-view=dokumenty] section,body[data-view=dokumenty] article,body[data-view=rekrutacja] form,.finance-content section,#companySettings details){background:var(--nt-surface)!important;color:var(--nt-ink)!important;border-color:var(--nt-line)!important}
+html[data-theme] :is(header,.topbar,.transport-bar,.transport-nav,body[data-view=spedytor] aside){background:var(--nt-header)!important;color:#e4f1f9!important}
+html[data-theme] :is(header,.topbar,.transport-nav) :is(a,small,.transport-heading-title){color:#d2e6f2!important}
+html[data-theme] .kpi.balance{background:var(--nt-header)!important;color:#eef7ff!important}
+html[data-theme] .kpi.balance :is(small,span){color:#b4ccd9!important}
+html[data-theme] :is(.muted,.small,.empty,.notes,.notes h2,.eyebrow,.report-stamp,.report-stamp small,.kpi small,.kpi>span,.metric-row small,.chart-legend,.cash-flow p,td small,.reconciliation span,.content>p,body[data-view=telemetry] p,body[data-view=telemetry] li,body[data-view=telemetry] footer){color:var(--nt-muted)!important}
+html[data-theme] :is(label,legend,.cash-flow strong){color:var(--nt-ink)!important}
+html[data-theme] a{color:var(--nt-link)}
+html[data-theme] :is(input:not([type=checkbox]):not([type=radio]),select,textarea){background:var(--nt-input)!important;color:var(--nt-ink)!important;border-color:var(--nt-line)!important}
+html[data-theme] input::placeholder,html[data-theme] textarea::placeholder{color:var(--nt-muted);opacity:.85}
+html[data-theme] :is(button.secondary,.btn.secondary,.secondary,#logout){background:var(--nt-raised)!important;color:var(--nt-link)!important;border-color:var(--nt-line)!important}
+html[data-theme] :is(th,thead){background:var(--nt-raised)!important;color:var(--nt-muted)!important}
+html[data-theme] :is(td,th,fieldset,.metric-row,.cash-flow,.panel,.box,.stat){border-color:var(--nt-line)!important}
+html[data-theme] table{background:var(--nt-surface)!important;color:var(--nt-ink)!important}
+html[data-theme] tbody tr{background:var(--nt-surface)}
+html[data-theme] tbody tr:nth-child(even){background:var(--nt-raised)!important}
+html[data-theme] .nav.active,html[data-theme] .nav:hover{background:var(--nt-raised)!important;color:var(--nt-link)!important}
+html[data-theme] .transport-nav a:hover,html[data-theme] .transport-nav a[aria-current]{background:#0b4b6a!important;color:#fff!important}
+html[data-theme] .reconciliation .total{background:var(--nt-raised)!important}
+html[data-theme=dark] :is(.positive,.success){color:#73d9b0!important}
+html[data-theme=dark] :is(.negative,#error,#msg,#completeError){color:#ffb0a7!important}
+html[data-theme=dark] :is(.warning,.notice.warning,.badge.late){background:#3b3021!important;color:#f0ca90!important;border-color:#94703c!important}
+html[data-theme=dark] .badge.done{background:#203d33!important;color:#9addba!important}
+html[data-theme=dark] :is(.count,.status){background:var(--nt-raised)!important;color:var(--nt-ink)!important}
+html[data-theme=dark] :is([style*="background:white" i],[style*="background: white" i],[style*="background:#fff" i],[style*="background: #fff" i]){background:var(--nt-surface)!important;color:var(--nt-ink)!important;border-color:var(--nt-line)!important}
+html[data-theme=dark] :is([style*="color:#183046" i],[style*="color: #183046" i],[style*="color:#146587" i]){color:var(--nt-link)!important}
+html[data-theme=dark] #chart svg line{stroke:var(--nt-line)}
+html[data-theme=dark] #chart svg text{fill:var(--nt-muted)}
+html[data-theme=dark] .leaflet-popup-content-wrapper,html[data-theme=dark] .leaflet-popup-tip,html[data-theme=dark] .leaflet-control a{background:var(--nt-surface);color:var(--nt-ink)}
+html[data-theme] .nt-theme-toggle{display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 auto;gap:6px;min-width:98px;width:auto!important;max-width:none;min-height:36px;padding:8px 12px!important;margin:0!important;border:1px solid #7298ac!important;border-radius:6px!important;font:600 12px 'Segoe UI',system-ui,sans-serif!important;line-height:1.3!important;letter-spacing:0!important;background:var(--nt-header)!important;color:#e6f3fa!important;cursor:pointer;white-space:nowrap;box-shadow:none!important;transform:none!important}
+html[data-theme] .nt-theme-toggle:hover{background:#0b4b6a!important;border-color:#94d5ee!important}
+html[data-theme] .nt-theme-toggle:focus-visible{outline:3px solid #69c9ed;outline-offset:3px}
+.nt-theme-tools{position:fixed;top:14px;right:16px;z-index:1200;display:flex;justify-content:end}.nt-theme-toggle::after{content:none!important}
+@media(max-width:700px){html[data-theme] .nt-theme-toggle{min-width:86px;padding:8px!important}.nt-theme-tools{top:10px;right:10px}}
+@media print{.nt-theme-toggle,.nt-theme-tools{display:none!important}html[data-theme],html[data-theme] body{background:#fff!important;color:#111!important}html[data-theme] :is(.panel,.card,.box,.stat,.kpi,.reconciliation>div,.finance-content section,th,td,tbody tr,tbody tr:nth-child(even)){background:#fff!important;color:#111!important;border-color:#ccc!important}html[data-theme] :is(.muted,.notes,.kpi small,.kpi>span,.eyebrow,.metric-row small){color:#444!important}}

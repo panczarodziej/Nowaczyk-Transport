@@ -1,4 +1,4 @@
-<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Mój panel</title><style>
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><link rel="stylesheet" href="/transport-theme.css"><script src="/transport-theme.js"></script><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowaczyk Transport — Mój panel</title><style>
 :root{font-family:Segoe UI,Arial,sans-serif;color:#182c43;background:#f1f4f7}*{box-sizing:border-box}body{margin:0}.layout{min-height:100vh}
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 3.3%;min-height:76px;background:#223242;color:white}
 .brand{font-weight:750}
@@ -205,3 +205,4 @@ loadTachograph();
 setInterval(renderTachograph,1000);
 init().catch(e=>notice('Nie udało się pobrać danych: '+e.message));
 </script></body></html>
+

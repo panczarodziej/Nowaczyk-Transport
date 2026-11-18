@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="pl"><head><meta charset="utf-8"><link rel="stylesheet" href="/transport-theme.css"><script src="/transport-theme.js"></script><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wnioski — Nowaczyk System</title>
 <link rel="stylesheet" href="/transport-ui.css">
 <script src="/transport-header.js" defer></script>
@@ -105,3 +105,4 @@ async function refreshCredits(){
 })().catch(error=>{statusLine.textContent=error.message});
 setInterval(()=>refreshCredits().catch(e=>{statusLine.textContent=e.message}),20000);
 </script></body></html>
+

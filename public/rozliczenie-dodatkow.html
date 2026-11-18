@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pl"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8"><link rel="stylesheet" href="/transport-theme.css"><script src="/transport-theme.js"></script><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dokument zakupu dodatków — Nowaczyk Transport</title>
 <link rel="stylesheet" href="/transport-ui.css">
 <style>
@@ -35,3 +35,4 @@ const pln=new Intl.NumberFormat('pl-PL',{style:'currency',currency:'PLN'});
 })().catch(error=>{get('status').textContent=error.message});
 get('print').onclick=()=>window.print();
 </script></body></html>
+
