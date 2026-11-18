@@ -34,7 +34,7 @@ function report(db,companyId,month,today,reviewAll=false){
  const cashOut=money(costs.reduce((s,e)=>s+num(e.amount),0)-cashEntries.filter(e=>num(e.amount)<0).reduce((s,e)=>s+num(e.amount),0));
  const dues=[];
  for(const l of db.fleetLeases||[])if(l.companyId===companyId)for(const p of l.schedule||[])if(p.status!=='paid')dues.push({id:l.id+':'+p.number,kind:'Leasing',label:'Rata '+p.number,vehicleId:l.vehicleId,due:p.due,amount:num(p.amount),overdue:p.due<today,url:'/finanse-floty.html'});
- for(const p of db.fleetPolicies||[])if(p.companyId===companyId&&!p.paid)dues.push({id:p.id,kind:'Ubezpieczenie',label:p.kind,vehicleId:p.vehicleId,due:p.due,amount:num(p.premium),overdue:p.due<today,url:'/finanse-floty.html'});
+ for(const p of db.fleetPolicies||[])if(p.companyId===companyId&&!p.paid&&!p.cancelledAt)dues.push({id:p.id,kind:'Ubezpieczenie',label:p.kind,vehicleId:p.vehicleId,due:p.due,amount:num(p.premium),overdue:p.due<today,url:'/finanse-floty.html'});
  const payroll=new Map();
  for(const r of done){const key=String(r.driver||'').toLowerCase();const d=payroll.get(key)||{driver:r.driver,routes:0,km:0,earned:0,paid:0};d.routes++;d.km+=num(r.drivenKm);d.earned+=num(r.drivenKm)*num(r.payRate??0.7);payroll.set(key,d)}
  for(const p of payments){const key=String(p.driver||'').toLowerCase();const d=payroll.get(key)||{driver:p.driver,routes:0,km:0,earned:0,paid:0};d.earned+=num(p.bonus)-num(p.deduction);d.paid+=num(p.amount);payroll.set(key,d)}

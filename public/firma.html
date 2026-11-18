@@ -188,6 +188,7 @@ function renderManagement(card,company,data,user){
   card.append(form);
  }else card.append(element('p','Brak pojazdów do przerejestrowania.'));
  card.append(element('h3','Flota firmy'));
+ if(!partners){const saleLink=element('a','Sprzedaj auto lub sprawdź historię sprzedaży →');saleLink.href='/flota-online.html';card.append(saleLink)}
  const list=element('ul');
  for(const vehicle of vehicles)list.append(element('li',[vehicle.model,vehicle.plate,vehicle.driverUsername||vehicle.assigneeUsername].filter(Boolean).join(' · ')));
  card.append(vehicles.length?list:element('p','Brak pojazdów we flocie.'));

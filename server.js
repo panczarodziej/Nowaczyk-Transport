@@ -260,7 +260,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/company/board','/api/company/maintenance','/api/company/maintenance/complete','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/fleet/sell','/api/fleet/sales','/api/company/board','/api/company/maintenance','/api/company/maintenance/complete','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
     !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
@@ -414,6 +414,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy.'});
   const a=await body(req),companyId=who(req).companyId,item=(db.maintenance||[]).find(x=>x.id===a.id&&x.companyId===companyId);
   if(!item)return send(res,404,{error:'Nie znaleziono serwisu.'});
+  if(item.status==='cancelled')return send(res,409,{error:'Serwis anulowano po sprzedaży pojazdu.'});
   if(item.status==='completed')return send(res,200,{ok:true,duplicate:true,item});
   const amount=Number(a.amount),invoiceNumber=str(a.invoiceNumber,100);
   if(!Number.isFinite(amount)||amount<0||amount>1000000||(amount>0&&!invoiceNumber))return send(res,400,{error:'Podaj koszt rzeczywisty i numer faktury.'});
@@ -1365,22 +1366,36 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   await save(db);
   return send(res,200,request);
  }
+ if(u.pathname==='/api/fleet/sales'&&method==='GET'){
+  if(!companyManager(req))return send(res,403,{error:'Historia sprzedaży jest dostępna dla szefów.'});
+  const companyId=who(req).companyId;
+  return send(res,200,{sales:(db.fleetSales||[]).filter(x=>auth(req)||x.companyId===companyId).slice().reverse()});
+ }
  if(u.pathname==='/api/fleet/sell'&&method==='POST'){
-  if(!auth(req))return send(res,403,{error:'Sprzedaż jest dostępna dla głównego szefa i administratora.'});
-  const {id,amount}=await body(req);
+  if(!companyManager(req))return send(res,403,{error:'Sprzedaż jest dostępna dla szefa firmy.'});
+  const {id,amount,buyer:buyerInput}=await body(req),buyer=str(buyerInput,120);
   if(typeof amount!=='string'||!/^(0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(amount)||Number(amount)<=0)return send(res,400,{error:'Podaj cenę sprzedaży w PLN.'});
-  const index=(db.fleet||[]).findIndex(vehicle=>vehicle.id===id);
-  if(index<0)return send(res,404,{error:'Pojazdu nie ma już we flocie.'});
-  const vehicle=db.fleet[index];
-  const companyId=vehicle.companyId||MAIN_COMPANY_ID;
+  const allowed=vehicle=>auth(req)||(vehicle.companyId||MAIN_COMPANY_ID)===who(req).companyId;
+  const index=(db.fleet||[]).findIndex(vehicle=>vehicle.id===id&&allowed(vehicle));
+  if(index<0){
+   const previous=(db.fleetSales||[]).find(vehicle=>vehicle.id===id&&allowed(vehicle));
+   if(previous&&previous.price===Number(amount))return send(res,200,{ok:true,duplicate:true,price:previous.price,companyId:previous.companyId,sale:previous});
+   return send(res,404,{error:'Pojazdu nie ma we flocie Twojej firmy lub został już sprzedany.'});
+  }
+  const vehicle=db.fleet[index],companyId=vehicle.companyId||MAIN_COMPANY_ID;
+  const leases=(db.fleetLeases||[]).filter(l=>l.vehicleId===vehicle.id&&l.companyId===companyId);
+  if((vehicle.financing==='lease'&&!leases.length)||leases.some(l=>!l.schedule?.length||l.schedule.some(p=>p.status!=='paid')))return send(res,409,{error:'Najpierw spłać leasing pojazdu. Nie można sprzedać auta z niespłaconym leasingiem.'});
+  const active=(db.routes||[]).some(r=>r.companyId===companyId&&!r.deliveredAt&&!r.settledAt&&r.status!=='Zakończona'&&(r.acceptedAt||r.status==='W trasie')&&
+   (r.vehicleId===vehicle.id||(!r.vehicleId&&vehicle.driverUsername&&r.driver?.toLowerCase()===vehicle.driverUsername.toLowerCase())));
+  if(active)return send(res,409,{error:'Pojazd obsługuje aktywną trasę. Zakończ kurs przed sprzedażą.'});
   const soldAt=new Date().toISOString(),price=Number(amount);
-  db.fleetSales??=[];
-  db.ledger??=[];
-  db.fleetSales.push({...vehicle,companyId,soldAt,price,soldBy:who(req).username});
-  db.ledger.push({id:crypto.randomUUID(),vehicleId:vehicle.id,companyId,type:'sprzedaz_pojazdu',description:vehicle.model+' · '+vehicle.plate,amount:price,createdAt:soldAt});
-  db.fleet.splice(index,1);
-  await save(db);
-  return send(res,200,{ok:true,price,companyId});
+  const sale={...vehicle,companyId,soldAt,price,buyer,saleId:crypto.randomUUID(),soldBy:who(req).username};
+  db.fleetSales??=[];db.ledger??=[];db.fleetSales.push(sale);
+  db.ledger.push({id:crypto.randomUUID(),vehicleId:vehicle.id,saleId:sale.saleId,companyId,type:'sprzedaz_pojazdu',description:vehicle.model+' · '+vehicle.plate+(buyer?' · '+buyer:''),amount:price,createdAt:soldAt});
+  for(const job of db.maintenance||[])if(job.companyId===companyId&&job.vehicleId===vehicle.id&&job.status==='planned')Object.assign(job,{status:'cancelled',cancelledAt:soldAt,cancelReason:'Sprzedaż pojazdu'});
+  for(const policy of db.fleetPolicies||[])if(policy.companyId===companyId&&policy.vehicleId===vehicle.id&&!policy.paid)policy.cancelledAt=soldAt;
+  db.fleet.splice(index,1);await save(db);
+  return send(res,200,{ok:true,price,companyId,sale});
  }
  if(['/api/accounts/login','/api/desktop/login'].includes(u.pathname)&&method==='POST'){
   const desktop=u.pathname==='/api/desktop/login';

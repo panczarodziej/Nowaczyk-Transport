@@ -4,7 +4,7 @@ async function api(url,options){const r=await fetch(url,{credentials:'same-origi
 const render=(id,rows,columns)=>$(id).innerHTML=rows.length?'<table><tr>'+columns.map(x=>'<th>'+esc(x[0])+'</th>').join('')+'</tr>'+rows.map(row=>'<tr>'+columns.map(x=>'<td>'+esc(x[1](row))+'</td>').join('')+'</tr>').join('')+'</table>':'<p class="muted">Brak wpisów</p>';
 async function refresh(){const [d,f,t]=await Promise.all([api('/api/fleet-finance/overview'),api('/api/fleet'),api('/api/trailers')]);const vehicles=[...(Array.isArray(f)?f:f.vehicles||f.fleet||[]),...(Array.isArray(t)?t:t.trailers||[])];for(const el of document.querySelectorAll('.vehicles'))el.innerHTML=vehicles.map(v=>'<option value="'+esc(v.id)+'">'+esc(v.model+' · '+v.plate)+'</option>').join('');
 render('leases',d.leases,[['Pojazd',x=>x.vehicleId],['Raty',x=>x.schedule.filter(p=>p.status==='paid').length+'/'+x.months],['Oprocentowanie',x=>x.apr+'%'],['Najbliższa rata',x=>x.schedule.find(p=>p.status!=='paid')?.due||'Spłacono']]);
-render('policies',d.policies,[['Pojazd',x=>x.vehicleId],['Rodzaj',x=>x.kind],['Do',x=>x.end],['Składka',x=>x.premium+' zł'],['Opłacona',x=>x.paid?'Tak':'Nie']]);
+render('policies',d.policies,[['Pojazd',x=>x.vehicleId],['Rodzaj',x=>x.kind],['Do',x=>x.end],['Składka',x=>x.premium+' zł'],['Status',x=>x.cancelledAt?'Anulowana · sprzedaż pojazdu':x.paid?'Opłacona':'Do zapłaty']]);
 render('tolls',d.tolls,[['Kraj',x=>x.country],['Rodzaj',x=>x.kind],['Do',x=>x.end],['Koszt',x=>x.price+' zł']]);
 render('notices',d.notices,[['Termin',x=>x.due],['Powiadomienie',x=>x.label],['Pozostało dni',x=>x.days]]);
 }

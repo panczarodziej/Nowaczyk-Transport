@@ -6,13 +6,13 @@
 
 <body data-view="flota-online">
 
-<header><h1>Nowaczyk <span style="color:#2794ff">Transport</span> — Flota online</h1><a style="color:white" href="/system.html">← Zarządzanie transportem</a></header><main><p><a href="/firma.html#vehicleRequests">Wniosek o zakup lub leasing pojazdu</a></p><div class="panel" id="editFleet"><h2>Przypisz ciągnik i naczepę do konta kierowcy</h2><p>Możesz przypisać pojazd do dowolnego aktywnego konta.</p><form id="assign"><input id="vehicleId" type="hidden"><div class="grid"><label>Model ciągnika<input id="model" placeholder="Scania R450" required maxlength="100"></label><label>Rejestracja ciągnika<input id="plate" placeholder="KWA 1234A" required maxlength="30"></label><label>Model naczepy<input id="trailerModel" placeholder="Schmitz SKO 24" maxlength="100"></label><label>Rejestracja naczepy<input id="trailerPlate" placeholder="KWA 52341" maxlength="30"></label><label>Konto pracownika<select id="driverAccountId"><option value="">Nieprzypisany</option></select></label></div><button type="submit">Zapisz przypisanie</button><button type="button" id="clear" style="background:#67798d">Nowy pojazd</button></form><p id="message" role="status"></p></div><div class="panel"><h2>Pojazdy i przypisani kierowcy</h2><div style="overflow:auto"><table><thead><tr><th>Ciągnik</th><th>Naczepa</th><th>Kierowca</th><th>Akcja</th></tr></thead><tbody id="vehicles"></tbody></table></div></div><dialog id="saleDialog"><form id="saleForm">
+<header><h1>Nowaczyk <span style="color:#2794ff">Transport</span> — Flota online</h1><a style="color:white" href="/system.html">← Zarządzanie transportem</a></header><main><p id="saleStatus" role="status"></p><p><a href="/firma.html#vehicleRequests">Wniosek o zakup lub leasing pojazdu</a></p><div class="panel" id="editFleet"><h2>Przypisz ciągnik i naczepę do konta kierowcy</h2><p>Możesz przypisać pojazd do dowolnego aktywnego konta.</p><form id="assign"><input id="vehicleId" type="hidden"><div class="grid"><label>Model ciągnika<input id="model" placeholder="Scania R450" required maxlength="100"></label><label>Rejestracja ciągnika<input id="plate" placeholder="KWA 1234A" required maxlength="30"></label><label>Model naczepy<input id="trailerModel" placeholder="Schmitz SKO 24" maxlength="100"></label><label>Rejestracja naczepy<input id="trailerPlate" placeholder="KWA 52341" maxlength="30"></label><label>Konto pracownika<select id="driverAccountId"><option value="">Nieprzypisany</option></select></label></div><button type="submit">Zapisz przypisanie</button><button type="button" id="clear" style="background:#67798d">Nowy pojazd</button></form><p id="message" role="status"></p></div><div class="panel"><h2>Pojazdy i przypisani kierowcy</h2><div style="overflow:auto"><table><thead><tr><th>Ciągnik</th><th>Naczepa</th><th>Kierowca</th><th>Akcja</th></tr></thead><tbody id="vehicles"></tbody></table></div></div><dialog id="saleDialog"><form id="saleForm">
 <h2>Sprzedaj ciągnik</h2><p id="saleVehicle"></p>
 <label>Cena sprzedaży (PLN)<input id="salePrice" type="number" required min="0.01" max="999999999.99" step="0.01"></label>
-<p id="saleError" role="status"></p>
+<label>Nabywca (opcjonalnie)<input id="saleBuyer" maxlength="120" placeholder="Nazwa firmy lub kupującego"></label><p>Auto zostanie odpięte od kierowcy i przeniesione do historii. Cena zasili konto firmy właściciela. Naczepa pozostaje w firmie.</p><p id="saleError" role="status"></p>
 <button type="submit">Potwierdź sprzedaż</button>
 <button type="button" id="cancelSale">Anuluj</button>
-</form></dialog></main>
+</form></dialog><section class="panel"><h2>Historia sprzedaży aut</h2><div id="saleHistory" style="overflow:auto"></div></section></main>
 <script>
 const $=id=>document.getElementById(id);let fleet=[],canEdit=false,fullEdit=false;async function api(url,opts){const r=await fetch(url,opts),d=await r.json();if(!r.ok)throw Error(d.error||'Błąd serwera');return d}
 async function refresh(){try{const {user}=await api('/api/accounts/me');fullEdit=user?.role==='admin'||(user?.role==='boss'&&user.companyId==='nowaczyk');
@@ -29,7 +29,8 @@ sell.onclick=()=>{
  $('saleForm').reset();
  $('saleDialog').showModal();
 };
-if(canEdit)td.append(btn);if(fullEdit)td.append(' ',sell);tr.append(td);tbody.append(tr)}if(!fleet.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.textContent='Brak pojazdów online — dodaj pierwszy.';tr.append(td);tbody.append(tr)}}catch(e){$('message').textContent=e.message}}
+if(canEdit)td.append(btn);if(canEdit)td.append(' ',sell);tr.append(td);tbody.append(tr)}if(!fleet.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.textContent='Brak pojazdów online — dodaj pierwszy.';tr.append(td);tbody.append(tr)}}catch(e){$('message').textContent=e.message}}
+async function loadSales(){try{const data=await api('/api/fleet/sales');const host=$('saleHistory');host.replaceChildren();if(!data.sales.length){host.textContent='Brak sprzedanych aut.';return}const table=document.createElement('table'),head=document.createElement('tr');for(const text of ['Data','Auto','Cena sprzedaży','Nabywca','Sprzedający']){const th=document.createElement('th');th.textContent=text;head.append(th)}table.append(head);for(const sale of data.sales){const tr=document.createElement('tr');for(const text of [new Date(sale.soldAt).toLocaleString('pl-PL'),sale.model+' · '+sale.plate,Number(sale.price).toLocaleString('pl-PL',{style:'currency',currency:'PLN'}),sale.buyer||'—',sale.soldBy]){const td=document.createElement('td');td.textContent=text;tr.append(td)}table.append(tr)}host.append(table)}catch(error){$('saleHistory').textContent=error.message}}
 let saleId;
 $('cancelSale').onclick=()=>$('saleDialog').close();
 $('saleForm').onsubmit=async event=>{
@@ -38,14 +39,14 @@ $('saleForm').onsubmit=async event=>{
  button.disabled=true;
  $('saleError').textContent='';
  try{
-  await api('/api/fleet/sell',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,amount:$('salePrice').value})});
+  await api('/api/fleet/sell',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,amount:$('salePrice').value,buyer:$('saleBuyer').value})});
   $('saleDialog').close();
   if($('vehicleId').value===id)$('clear').click();
   $('message').style.color='#168348';
-  $('message').textContent='Ciągnik sprzedany. Kwota trafiła do finansów firmy.';
-  await refresh();
+  $('saleStatus').textContent='Ciągnik sprzedany. Kwota trafiła do finansów firmy właściciela.';
+  await refresh();await loadSales();
  }catch(error){$('saleError').textContent=error.message}
  finally{button.disabled=false}
 };
-$('assign').onsubmit=async e=>{e.preventDefault();const data={id:$('vehicleId').value,...Object.fromEntries(['model','plate','trailerModel','trailerPlate','driverAccountId'].map(k=>[k,$(k).value]))};try{await api('/api/fleet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});$('message').style.color='#168348';$('message').textContent='Przypisanie zapisane na serwerze.';$('assign').reset();$('vehicleId').value='';await refresh()}catch(err){$('message').style.color='#b03b40';$('message').textContent=err.message}};$('clear').onclick=()=>{$('assign').reset();$('vehicleId').value=''};refresh();
+$('assign').onsubmit=async e=>{e.preventDefault();const data={id:$('vehicleId').value,...Object.fromEntries(['model','plate','trailerModel','trailerPlate','driverAccountId'].map(k=>[k,$(k).value]))};try{await api('/api/fleet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});$('message').style.color='#168348';$('message').textContent='Przypisanie zapisane na serwerze.';$('assign').reset();$('vehicleId').value='';await refresh()}catch(err){$('message').style.color='#b03b40';$('message').textContent=err.message}};$('clear').onclick=()=>{$('assign').reset();$('vehicleId').value=''};refresh();loadSales();
 </script></html>
