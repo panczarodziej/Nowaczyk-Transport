@@ -1374,7 +1374,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(u.pathname==='/api/fleet/sell'&&method==='POST'){
   if(!companyManager(req))return send(res,403,{error:'Sprzedaż jest dostępna dla szefa firmy.'});
   const {id,amount,buyer:buyerInput}=await body(req),buyer=str(buyerInput,120);
-  if(typeof amount!=='string'||!/^(0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(amount)||Number(amount)<=0)return send(res,400,{error:'Podaj cenę sprzedaży w PLN.'});
+  if(typeof amount!=='string'||!/^(0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(amount)||(Number(amount)<=0||Number(amount)>800000))return send(res,400,{error:'Cena sprzedaży musi wynosić od 0,01 do 800 000 zł.'});
   const allowed=vehicle=>auth(req)||(vehicle.companyId||MAIN_COMPANY_ID)===who(req).companyId;
   const index=(db.fleet||[]).findIndex(vehicle=>vehicle.id===id&&allowed(vehicle));
   if(index<0){

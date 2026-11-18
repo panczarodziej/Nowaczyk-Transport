@@ -37,7 +37,7 @@ test('vehicle sales for bosses, company isolation, leasing, routes and exactly-o
  assert.equal((await req('/api/fleet/sell',sale,driver.cookie)).status,403);
  assert.equal((await req('/api/fleet/sales',null,driver.cookie)).status,403);
  assert.equal((await req('/api/fleet/sell',{...sale,id:'truck-a'},partner.cookie)).status,404);
- for(const amount of ['0','-1','1.001','NaN','1000000000',100])assert.equal((await req('/api/fleet/sell',{...sale,amount},partner.cookie)).status,400);
+ for(const amount of ['0','-1','1.001','NaN','1000000000','800000.01','800001',100])assert.equal((await req('/api/fleet/sell',{...sale,amount},partner.cookie)).status,400);
  assert.equal((await req('/api/fleet/sell',{...sale,id:'lease'},partner.cookie)).status,409);
  assert.equal((await req('/api/fleet/sell',{...sale,id:'active'},partner.cookie)).status,409);
  const before=(await req('/api/company/board',null,partner.cookie)).data.summary.cash;
@@ -53,7 +53,7 @@ test('vehicle sales for bosses, company isolation, leasing, routes and exactly-o
  const fleet=(await req('/api/fleet',null,partner.cookie)).data.fleet;
  assert.ok(!fleet.some(v=>v.id==='truck-b'));
  const history=(await req('/api/fleet/sales',null,sub.cookie)).data.sales;assert.equal(history.length,1);assert.equal(history[0].buyer,'Testowy nabywca');
- const main=await req('/api/fleet/sell',{id:'truck-a',amount:'20000'},admin.cookie);assert.equal(main.status,200);assert.equal(main.data.companyId,'nowaczyk');
+ const main=await req('/api/fleet/sell',{id:'truck-a',amount:'800000'},admin.cookie);assert.equal(main.status,200);assert.equal(main.data.companyId,'nowaczyk');assert.equal(main.data.price,800000);
  assert.equal((await req('/api/fleet/sales',null,partner.cookie)).data.sales.length,1);
  assert.equal((await req('/api/fleet/sales',null,admin.cookie)).data.sales.length,2);
  assert.equal((await req('/api/routes?mine=1',null,partner.cookie)).data.length,0);
