@@ -1,8 +1,8 @@
 {
   "name": "nowaczyk-transport-telemetry",
-  "version": "0.3.35",
+  "version": "0.3.36",
   "private": true,
-  "description": "Nowaczyk Transport — panel kierowcy i telemetria",
+  "description": "Nowaczyk Transport \u2014 panel kierowcy i telemetria",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -25,7 +25,8 @@
       "ui.html",
       "icon.png",
       "save-importer.js",
-      "telemetry-sync.js"
+      "telemetry-sync.js",
+      "plugin-install.js"
     ],
     "win": {
       "icon": "icon.ico",
@@ -57,4 +58,3 @@
     "artifactName": "Nowaczyk-Transport-Setup-${version}.${ext}"
   }
 }
-

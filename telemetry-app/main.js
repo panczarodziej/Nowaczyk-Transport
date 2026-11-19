@@ -59,19 +59,28 @@ function detectEts(){
 }
 function pluginStatus(etsPath){
  const target=path.join(etsPath||'', 'bin','win_x64','plugins','scs-telemetry.dll');
- return {installed:!!etsPath&&fs.existsSync(target),target};
+ return {installed:!!etsPath&&fs.existsSync(target),target,message:pluginMessage};
 }
-async function installPlugin(etsPath){
+let pluginMessage='',pluginBusy=false;
+function elevatedPluginCopy({source,target}){
+ const quote=value=>"'"+value.replace(/'/g,"''")+"'";
+ const script=`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force -Path ${quote(path.dirname(target))} | Out-Null; if(Test-Path -LiteralPath ${quote(target)}){Copy-Item -LiteralPath ${quote(target)} -Destination ${quote(target+'.backup-'+Date.now())}}; Copy-Item -LiteralPath ${quote(source)} -Destination ${quote(target)} -Force`;
+ const encoded=Buffer.from(script,'utf16le').toString('base64');
+ const launcher=`$p=Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -NonInteractive -EncodedCommand ${encoded}' -Wait -PassThru; exit $p.ExitCode`;
+ return new Promise((resolve,reject)=>cp.execFile('powershell.exe',['-NoProfile','-NonInteractive','-Command',launcher],{windowsHide:true,timeout:120000},error=>error?reject(Error('Windows nie zezwolił na instalację wtyczki. Zaakceptuj uprawnienia administratora przy następnej próbie.')):resolve()));
+}
+async function installPlugin(etsPath,allowElevation=true){
  if(process.platform!=='win32')throw Error('Instalacja pluginu jest dostępna tylko na Windows');
- const game=path.resolve(etsPath||'');
- if(!fs.existsSync(path.join(game,'bin','win_x64','eurotrucks2.exe')))throw Error('Wybierz poprawny folder ETS2');
- const running=await gameStatus();if(running.running)throw Error('Zamknij ETS2 przed instalacją pluginu');
- const source=resourcePath('plugins','scs-telemetry.dll');
- if(!fs.existsSync(source))throw Error('Brak dołączonego pluginu. Zainstaluj ponownie aplikację Nowaczyk Transport Telemetry.');
- const target=path.join(game,'bin','win_x64','plugins','scs-telemetry.dll');
- fs.mkdirSync(path.dirname(target),{recursive:true});
- if(fs.existsSync(target))fs.copyFileSync(target,target+'.backup-'+Date.now());
- fs.copyFileSync(source,target);return {installed:true,target};
+ const result=await require('./plugin-install').ensurePlugin({game:etsPath,source:resourcePath('plugins','scs-telemetry.dll'),running:(await gameStatus()).running,elevate:allowElevation?elevatedPluginCopy:null});
+ pluginMessage=result.pending?result.message:'Wtyczka ETS2 gotowa. Uruchom grę i wczytaj profil.';
+ return result;
+}
+async function autoInstallPlugin(allowElevation=false){
+ if(process.platform!=='win32'||pluginBusy)return;
+ pluginBusy=true;
+ try{initializeEtsFolder();await installPlugin(settings().etsPath,allowElevation)}
+ catch(error){pluginMessage=['EACCES','EPERM'].includes(error.code)?'Windows blokuje zapis. Kliknij Zainstaluj plugin i zaakceptuj uprawnienia administratora.':error.message}
+ finally{pluginBusy=false}
 }
 function gameStatus(){return new Promise(resolve=>{
  if(process.platform!=='win32')return resolve({running:false,platform:process.platform});
@@ -83,7 +92,7 @@ let desktopAuth=null;
 async function loginDesktop(credentials){
  const origin=baseUrl();const r=await fetch(origin+'/api/desktop/login',{method:'POST',headers:{'Content-Type':'application/json','X-Nowaczyk-Client':'desktop'},body:JSON.stringify({username:String(credentials?.username||''),password:String(credentials?.password||'')}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok)return {ok:false,error:data.error};
  const cookie=/ks_session=([a-f0-9]+)/.exec(r.headers.get('set-cookie')||'')?.[1];if(!cookie||!data.desktopToken)return {ok:false,error:'Serwer nie obsługuje logowania aplikacji. Wdróż aktualizację serwera.'};
- await driverSession().cookies.set({url:origin,name:'ks_session',value:cookie,httpOnly:true,secure:origin.startsWith('https:'),sameSite:'strict',path:'/'});desktopAuth={origin,cookie,token:data.desktopToken,username:data.user.username};captureDriver=data.user.username.toLowerCase();if(settings().autoSync)void syncTelemetry();return {ok:true,user:data.user};
+ await driverSession().cookies.set({url:origin,name:'ks_session',value:cookie,httpOnly:true,secure:origin.startsWith('https:'),sameSite:'strict',path:'/'});desktopAuth={origin,cookie,token:data.desktopToken,username:data.user.username};captureDriver=data.user.username.toLowerCase();const config={...settings(),autoSync:true};fs.writeFileSync(file(),JSON.stringify(config,null,2));void syncTelemetry();return {ok:true,user:data.user};
 }
 let driverWindow=null;let syncInProgress=false;let syncInfo={ok:false,message:"Oczekiwanie na połączenie"};
 const driverSession=()=>session.fromPartition('persist:ksgroup-driver');
@@ -265,11 +274,12 @@ app.whenReady().then(async()=>{
  });
  setInterval(()=>void autoDispatch(),15000);
  try{initializeEtsFolder()}catch(error){console.error("Wykrywanie ETS2:",error.message)}
+ void autoInstallPlugin(true);setInterval(()=>void autoInstallPlugin(false),10000);
  restoreEvents();try{const account=await driverRequest('/api/accounts/me');captureDriver=account.user?.username?.toLowerCase()||null}catch{}startBridge();startReader();setInterval(()=>{if(!readerProcess)startReader()},10000);ipcMain.handle('desktop-login',(_,credentials)=>loginDesktop(credentials));ipcMain.handle('accept-driver-route',async(_,id)=>{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))return {ok:false,error:'Nieprawidłowe ID'};return driverRequest('/api/routes/accept',{method:'POST',body:JSON.stringify({routeId:id})})});ipcMain.handle('import-driver-route',async(_,id)=>{try{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))throw Error('Nieprawidłowe ID');const job=await driverRequest('/api/routes/export?id='+encodeURIComponent(id));if(!job.ok)return job;if(!job.acceptedAt)return {ok:false,error:'Najpierw przyjmij trasę w aplikacji'};const picked=await dialog.showOpenDialog(win,{title:'Wybierz zapis game.sii z profilu ETS2 (menu profili)',properties:['openFile'],filters:[{name:'Zapis ETS2',extensions:['sii']}]});if(picked.canceled)return {ok:false,error:'Anulowano'};const importer=require('./save-importer');const ramps={source:importer.loadingPoint(job.from)};
  const r=importer.importFile(picked.filePaths[0],job,ramps);return {ok:true,...r}}catch(e){return {ok:false,error:e.message}}});ipcMain.handle('open-driver-panel',()=>openDriverPanel());ipcMain.handle('driver-status',async()=>{const r=await driverRequest('/api/accounts/me');if(r.user)captureDriver=r.user.username.toLowerCase();else if(r.status===401)captureDriver=null;return {...r,desktopReady:!!desktopAuth&&desktopAuth.origin===baseUrl()&&desktopAuth.username.toLowerCase()===captureDriver}});ipcMain.handle('map-profile-get',()=>driverRequest('/api/driver/map-profile'));ipcMain.handle('map-profile-set',async(_,mapProfile)=>{if(!['promods','promods-pr'].includes(mapProfile))return {ok:false,error:'Nieprawidłowy profil'};return driverRequest('/api/driver/map-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mapProfile})})});ipcMain.handle('driver-routes',listDriverRoutes);ipcMain.handle('export-driver-route',async(_,id)=>{if(typeof id!=='string'||!(/^[a-f0-9-]{8,80}$/i.test(id)))return {ok:false,error:'Nieprawidłowe ID zlecenia'};const result=await driverRequest('/api/routes/export?id='+encodeURIComponent(id));if(!result.ok)return result;const destination=await dialog.showSaveDialog(win,{title:'Zapisz manifest zlecenia Nowaczyk Transport',defaultPath:'ks-job-'+id+'.json',filters:[{name:'JSON',extensions:['json']}]});if(destination.canceled||!destination.filePath)return {ok:false,error:'Anulowano'};fs.writeFileSync(destination.filePath,JSON.stringify(result,null,2),'utf8');return {ok:true,path:destination.filePath};});ipcMain.handle('sync-telemetry',()=>syncTelemetry());ipcMain.handle('sync-info',()=>({...syncInfo,readerError,updateStatus}));setInterval(()=>{if(settings().autoSync)syncTelemetry().catch(e=>{syncInfo={ok:false,error:e.message,at:new Date().toISOString()}})},5000);ipcMain.handle('plugin-status',(_,p)=>pluginStatus(p));ipcMain.handle('install-plugin',(_,p)=>installPlugin(p));ipcMain.handle('telemetry-status',()=>lastTelemetry?{...lastTelemetry,ageMs:Date.now()-lastTelemetry.receivedAt}:null);ipcMain.handle('get-settings',()=>({...settings(),appVersion:app.getVersion()}));ipcMain.handle('save-settings',async(_,x)=>{
  const saved=save({...x,etsPath:x.etsPath||detectEts()});
  if(process.platform!=='win32'||!saved.etsPath||pluginStatus(saved.etsPath).installed)return saved;
- try{await installPlugin(saved.etsPath);return {...saved,pluginMessage:'Plugin ETS2 zainstalowany.'}}
+ try{const result=await installPlugin(saved.etsPath);return {...saved,pluginMessage:result.pending?result.message:'Plugin ETS2 zainstalowany.'}}
  catch(e){return {...saved,pluginMessage:e.message}}
 });ipcMain.handle('choose-ets',async()=>{const r=await dialog.showOpenDialog(win,{title:'Wybierz folder Euro Truck Simulator 2',properties:['openDirectory']});return r.canceled?'':r.filePaths[0]});ipcMain.handle('minimize',()=>win.hide());ipcMain.handle('detect-ets',()=>detectEts());ipcMain.handle('game-status',()=>gameStatus());ipcMain.handle('server-status',(_,url)=>serverStatus(url));create();startUpdates()});app.on('before-quit',()=>{app.isQuitting=true;readerProcess?.kill();bridgeServer?.close()});app.on('window-all-closed',()=>{});
 
