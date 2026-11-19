@@ -1,3 +1,4 @@
+const {expireRejectedApplications}=require('./application-retention');
 'use strict';
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {validateJob,jobIdentityReasons}=require('./job-match');
@@ -254,7 +255,7 @@ const limits=new Map();function rate(req,key,max=10){const k=client(req)+key,now
 const mime={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.zip':'application/zip','.png':'image/png','.webp':'image/webp','.svg':'image/svg+xml'};
 let mutationTail=Promise.resolve();
 const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].includes(req.method)){const previous=mutationTail;mutationTail=new Promise(resolve=>{release=resolve});await previous}try{
- const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();
+ const u=new URL(req.url,'http://localhost');const method=req.method;const db=await load();expireRejectedApplications(db);
  if(u.pathname.startsWith('/api/fleet-finance/')&&pool){const budgets=await pool.query('SELECT company_id,initial_cents FROM ks_company_budget');db.initialBudgets=Object.fromEntries(budgets.rows.map(x=>[x.company_id,{initialCents:Number(x.initial_cents)}]))}
   const key=sessionKey(req);
  req[requestSession]=key?db.authSessions?.[key]:null;
@@ -1589,6 +1590,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  const policy=basePolicy+(file==='centrum-floty.html'?fleetMapPolicy:'');
  res.writeHead(200,{'Content-Type':mime[path.extname(full)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Content-Security-Policy':policy});fs.createReadStream(full).pipe(res);
 }catch(e){if(res.destroyed)return;console.error(e);if(!res.headersSent)send(res,500,{error:'Błąd serwera'})}finally{release?.()}});
+async function applicationRetentionTick(){const previous=mutationTail;let release;mutationTail=new Promise(resolve=>{release=resolve});await previous;try{const db=await load();if(expireRejectedApplications(db))await save(db)}catch(error){console.error('Usuwanie odrzuconych podań:',error.message)}finally{release()}}
 async function financeTick(){const previous=mutationTail;let release;mutationTail=new Promise(resolve=>{release=resolve});await previous;try{const db=await load();if(pool){const budgets=await pool.query('SELECT company_id,initial_cents FROM ks_company_budget');db.initialBudgets=Object.fromEntries(budgets.rows.map(x=>[x.company_id,{initialCents:Number(x.initial_cents)}]))}if(fleetFinance.processDue(db))await save(db)}catch(error){console.error('Finanse floty:',error)}finally{release()}}
-initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>{console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT);financeTick();setInterval(financeTick,60*60*1000).unref()})).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
+initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>{console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT);void applicationRetentionTick();setInterval(applicationRetentionTick,60000).unref();financeTick();setInterval(financeTick,60*60*1000).unref()})).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
 
