@@ -2,6 +2,7 @@
 # Tylko odczyt mapy Local\SCSTelemetry, wysylka do 127.0.0.1.
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Core
+. (Join-Path $PSScriptRoot 'memory-reader.ps1')
 function F32($b,$o){ return [BitConverter]::ToSingle($b,$o) }
 function F64($b,$o){ return [BitConverter]::ToDouble($b,$o) }
 function S($b,$o,$n=64) {
@@ -38,23 +39,7 @@ try {
 
 while($true) {
  try {
-  $mmf=$null
-  $denied=$false
-  foreach($name in @('Local\SCSTelemetry','SCSTelemetry','Global\SCSTelemetry')) {
-   try { $mmf=[IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($name,[IO.MemoryMappedFiles.MemoryMappedFileRights]::Read); break } catch {
-    if($_.Exception.InnerException -is [UnauthorizedAccessException]) { $denied=$true }
-   }
-  }
-  if($null -eq $mmf -and $denied) { throw 'Odmowa odczytu SCSTelemetry. Uruchom ETS2 i Nowaczyk na tym samym poziomie uprawnien.' }
-  if($null -eq $mmf) { throw 'Nie znaleziono mapy pamieci SCSTelemetry (DLL nie udostepnia danych)' }
-  try {
-   $view=$mmf.CreateViewAccessor(0,0,[IO.MemoryMappedFiles.MemoryMappedFileAccess]::Read)
-   try {
-    if($view.Capacity -lt 4400) { throw "Za mala mapa pamieci: $($view.Capacity) bajtow" }
-    $b=New-Object byte[] (4400)
-    for($i=0;$i -lt $b.Length;$i++) { $b[$i]=$view.ReadByte($i) }
-   } finally { $view.Dispose() }
-  } finally { $mmf.Dispose() }
+  $b=Read-NowaczykTelemetryMemory
   if($b[0] -ne 1) { Report "Mapa dostepna, ale nieaktywna: pierwszy bajt=$($b[0])"; Start-Sleep -Seconds 2; continue }
   $rev=[BitConverter]::ToUInt32($b,40)
   if($rev -ne 12) { Report "Nieobslugiwana rewizja pluginu: $rev (czytnik oczekuje 12)"; Start-Sleep -Seconds 5; continue }

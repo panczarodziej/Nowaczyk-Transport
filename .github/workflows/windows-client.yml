@@ -31,6 +31,9 @@ jobs:
           node-version: '22'
       - run: npm ci
         working-directory: telemetry-app
+      - name: Test RenCloud memory reader on Windows PowerShell
+        shell: powershell
+        run: ./tests/memory-reader.windows.ps1
       - run: npm run build:win -- --publish never
         working-directory: telemetry-app
         env:
@@ -73,3 +76,4 @@ jobs:
           else
             gh release create "$tag" "${assets[@]}" --target "$GITHUB_SHA" --latest --title "$tag" --generate-notes
           fi
+
