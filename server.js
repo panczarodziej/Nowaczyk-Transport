@@ -464,7 +464,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    if(event.type==='job-delivered'&&event.telemetry?.destinationCity)deliveries.set(event.driver.toLowerCase(),event);
   }
   const companyNames=new Map(db.companies.map(company=>[company.id,company.name]));
-  const positions=drivingRoster(db).map(account=>{
+  const positions=[...accounts.values()].filter(account=>account.active&&!account.deletedAt).map(account=>{
    const companyId=account.companyId;
    const report=db.fleetPositions?.[account.username.toLowerCase()];
    const p=report?.companyId===companyId?report:{driver:account.username,companyId};

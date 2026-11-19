@@ -2,6 +2,7 @@
 const {app,BrowserWindow,ipcMain,dialog,Tray,Menu,nativeImage,session,shell}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'),http=require('node:http');
 function resourcePath(...parts){return path.join(app.isPackaged?process.resourcesPath:__dirname,...parts)}
+const {normalizeSettings,positionPayload}=require('./telemetry-sync');
 let readerError='';
 let lastTelemetry=null; let bridgeServer=null; let readerProcess=null; const pendingEvents=[];
 // Kolejka zdarzen zapisana na dysku: restart aplikacji nie gubi dostaw.
@@ -22,8 +23,8 @@ function startBridge(){bridgeServer=http.createServer((req,res)=>{if(req.url!=='
 
 let win,tray;
 const file=()=>path.join(app.getPath('userData'),'settings.json');
-function settings(){try{const saved=JSON.parse(fs.readFileSync(file(),'utf8'));if(saved.server==='https://nowaczyk-transport.onrender.com')saved.server='https://nowaczyk-transport-6kth.onrender.com';return saved}catch{return {etsPath:'',server:'https://nowaczyk-transport-6kth.onrender.com',autostart:false,startMinimized:false,autoSync:true}}}
-function save(x){const old=settings();const next={...old,etsPath:String(x.etsPath||''),server:String(x.server||'https://nowaczyk-transport-6kth.onrender.com'),autostart:!!x.autostart,startMinimized:!!x.startMinimized,autoSync:!!x.autoSync};if(!/^https?:\/\//.test(next.server))throw Error('Adres serwera musi zaczynać się od http:// lub https://');fs.writeFileSync(file(),JSON.stringify(next,null,2));app.setLoginItemSettings({openAtLogin:next.autostart,args:next.startMinimized?['--minimized']:[]});return next}
+function settings(){try{return normalizeSettings(JSON.parse(fs.readFileSync(file(),'utf8')))}catch{return normalizeSettings(null)}}
+function save(x){const old=settings();const next={...old,etsPath:String(x.etsPath||''),server:String(x.server||'https://nowaczyk-transport-6kth.onrender.com'),autostart:!!x.autostart,startMinimized:!!x.startMinimized,autoSync:typeof x.autoSync==='boolean'?x.autoSync:old.autoSync};if(!/^https?:\/\//.test(next.server))throw Error('Adres serwera musi zaczynać się od http:// lub https://');fs.writeFileSync(file(),JSON.stringify(next,null,2));app.setLoginItemSettings({openAtLogin:next.autostart,args:next.startMinimized?['--minimized']:[]});return next}
 function validEtsFolder(folder){
  return Boolean(folder&&fs.existsSync(path.join(folder,'bin','win_x64','eurotrucks2.exe')));
 }
@@ -82,7 +83,7 @@ let desktopAuth=null;
 async function loginDesktop(credentials){
  const origin=baseUrl();const r=await fetch(origin+'/api/desktop/login',{method:'POST',headers:{'Content-Type':'application/json','X-Nowaczyk-Client':'desktop'},body:JSON.stringify({username:String(credentials?.username||''),password:String(credentials?.password||'')}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok)return {ok:false,error:data.error};
  const cookie=/ks_session=([a-f0-9]+)/.exec(r.headers.get('set-cookie')||'')?.[1];if(!cookie||!data.desktopToken)return {ok:false,error:'Serwer nie obsługuje logowania aplikacji. Wdróż aktualizację serwera.'};
- await driverSession().cookies.set({url:origin,name:'ks_session',value:cookie,httpOnly:true,secure:origin.startsWith('https:'),sameSite:'strict',path:'/'});desktopAuth={origin,cookie,token:data.desktopToken,username:data.user.username};captureDriver=data.user.username.toLowerCase();return {ok:true,user:data.user};
+ await driverSession().cookies.set({url:origin,name:'ks_session',value:cookie,httpOnly:true,secure:origin.startsWith('https:'),sameSite:'strict',path:'/'});desktopAuth={origin,cookie,token:data.desktopToken,username:data.user.username};captureDriver=data.user.username.toLowerCase();if(settings().autoSync)void syncTelemetry();return {ok:true,user:data.user};
 }
 let driverWindow=null;let syncInProgress=false;let syncInfo={ok:false,message:"Oczekiwanie na połączenie"};
 const driverSession=()=>session.fromPartition('persist:ksgroup-driver');
@@ -123,10 +124,9 @@ async function syncTelemetryInner(){
    if(ev.type==='job-delivered'&&win&&!win.isDestroyed())win.webContents.send('driver-routes-changed');
   }catch{break}
  }
- const t=lastTelemetry;const fresh=t&&Date.now()-t.receivedAt<=15000;
- const hasPosition=fresh&&[t.worldX,t.worldZ].every(Number.isFinite);
- const result=hasPosition?await driverRequest('/api/fleet/position',{method:'POST',body:JSON.stringify({x:t.worldX,z:t.worldZ,speedKmh:Math.max(0,Math.min(200,t.speedKmh||0)),activity:t.paused?'Gra wstrzymana':t.speedKmh>=3?'Jazda':'Postój',city:'',place:t.paused?'Gra wstrzymana':'Telemetria ETS2',cargo:t.cargo,cargoMassKg:t.cargoMassKg,odometerKm:t.odometerKm,onJob:t.onJob,cargoLoaded:t.cargoLoaded})}):{ok:false,error:'Czytnik nie podał współrzędnych ETS2'};
- const outcome=result.ok?{ok:true,driver:result.position?.driver,verified:false,sentEvents}:{...result,sentEvents};return outcome;
+ const packet=positionPayload(lastTelemetry);
+ const result=packet.ok?await driverRequest('/api/fleet/position',{method:'POST',body:JSON.stringify(packet.payload)}):packet;
+ const outcome=result.ok?{ok:true,driver:result.position?.driver,positionSentAt:result.position?.updatedAt,verified:false,sentEvents}:{...result,sentEvents};return outcome;
 }
 function create(){const s=settings();win=new BrowserWindow({width:680,height:650,minWidth:560,minHeight:500,show:false,icon:path.join(__dirname,'icon.png'),webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false}});win.loadFile('ui.html');win.once('ready-to-show',()=>{if(!((process.argv.includes('--minimized')||s.startMinimized)&&app.getLoginItemSettings().wasOpenedAtLogin))win.show()});win.on('close',e=>{if(!app.isQuitting){e.preventDefault();win.hide()}});
  // Ikona zasobnika generowana w kodzie, bez pobierania z internetu.

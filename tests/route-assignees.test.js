@@ -38,6 +38,9 @@ test('main boss and dispatcher assign to every active role across companies; eac
   for(const [username] of targets)assert.ok(list.data.includes(username),username+' missing');
   assert.ok(!list.data.includes('blocked'));
  }
+ const mapBefore=await req('/api/fleet/positions',null,admin.cookie);assert.equal(mapBefore.status,200);
+ for(const [username] of targets){const row=mapBefore.data.positions.find(p=>p.driver===username);assert.ok(row,username+' is listed before first position');assert.equal(row.online,false);assert.equal(row.x,undefined)}
+ assert.ok(!mapBefore.data.positions.some(p=>p.driver==='blocked'));
  const payload={from:'Krakow',to:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'milk',cargoTons:18,plannedKm:600};
  assert.equal((await req('/api/routes',{...payload,driver:'blocked'},admin.cookie)).status,400);
  const jobs=new Map();
