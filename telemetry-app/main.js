@@ -63,7 +63,7 @@ function pluginStatus(etsPath){
  const target=path.join(etsPath||'', 'bin','win_x64','plugins','scs-telemetry.dll');
  return {installed:!!etsPath&&fs.existsSync(target),target,message:pluginMessage};
 }
-let pluginMessage='',pluginBusy=false;
+let pluginMessage='',pluginBusy=false;const pluginElevationAttempts=new Set();
 function elevatedPluginCopy({source,target}){
  const quote=value=>"'"+value.replace(/'/g,"''")+"'";
  const script=`$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force -Path ${quote(path.dirname(target))} | Out-Null; if(Test-Path -LiteralPath ${quote(target)}){Copy-Item -LiteralPath ${quote(target)} -Destination ${quote(target+'.backup-'+Date.now())}}; Copy-Item -LiteralPath ${quote(source)} -Destination ${quote(target)} -Force`;
@@ -73,21 +73,39 @@ function elevatedPluginCopy({source,target}){
 }
 async function installPlugin(etsPath,allowElevation=true){
  if(process.platform!=='win32')throw Error('Instalacja pluginu jest dostępna tylko na Windows');
- const result=await require('./plugin-install').ensurePlugin({game:etsPath,source:resourcePath('plugins','scs-telemetry.dll'),running:(await gameStatus()).running,elevate:allowElevation?elevatedPluginCopy:null});
- pluginMessage=result.pending?result.message:'Wtyczka ETS2 gotowa. Uruchom grę i wczytaj profil.';
+ const game=await gameStatus();
+ if(game.ambiguous)throw Error('Uruchomiona jest więcej niż jedna kopia ETS2. Zamknij dodatkową grę.');
+ if(game.unsupported&&!game.folder)throw Error('Uruchom ETS2 w wersji 64-bitowej. Wtyczka obsługuje win_x64.');
+ const folder=game.folder||etsPath;
+ if(game.folder&&validEtsFolder(game.folder)&&settings().etsPath!==game.folder)fs.writeFileSync(file(),JSON.stringify({...settings(),etsPath:game.folder},null,2));
+ const result=await require('./plugin-install').ensurePlugin({game:folder,source:resourcePath('plugins','scs-telemetry.dll'),running:game.running,elevate:allowElevation?elevatedPluginCopy:null});
+ pluginMessage=result.pending?result.message:game.running&&(!lastTelemetry||Date.now()-lastTelemetry.receivedAt>15000)?'Plik jest we właściwym folderze gry, ale ETS2 nie udostępnia danych. Zamknij i uruchom grę ponownie; zaakceptuj komunikat SDK.':'Wtyczka ETS2 gotowa. Uruchom grę i wczytaj profil.';
  return result;
 }
 async function autoInstallPlugin(allowElevation=false){
  if(process.platform!=='win32'||pluginBusy)return;
  pluginBusy=true;
- try{initializeEtsFolder();await installPlugin(settings().etsPath,allowElevation)}
+ try{initializeEtsFolder();const game=await gameStatus();const folder=game.folder||settings().etsPath;const elevate=allowElevation||(game.running===false&&folder&&!pluginElevationAttempts.has(folder));if(game.running===false&&folder)pluginElevationAttempts.add(folder);await installPlugin(folder,elevate)}
  catch(error){pluginMessage=['EACCES','EPERM'].includes(error.code)?'Windows blokuje zapis. Kliknij Zainstaluj plugin i zaakceptuj uprawnienia administratora.':error.message}
  finally{pluginBusy=false}
 }
-function gameStatus(){return new Promise(resolve=>{
- if(process.platform!=='win32')return resolve({running:false,platform:process.platform});
- cp.execFile('tasklist',['/FI','IMAGENAME eq eurotrucks2.exe','/FO','CSV','/NH'],{windowsHide:true,timeout:4500},(err,out)=>resolve({running:err?null:/"eurotrucks2\.exe"/i.test(out),platform:'win32'}));
-});}
+let gameProbe=null,gameProbeAt=0,gameProbeResult=null;
+function gameStatus(){
+ if(process.platform!=='win32')return Promise.resolve({running:false,platform:process.platform});
+ if(gameProbe)return gameProbe;
+ if(gameProbeResult&&Date.now()-gameProbeAt<5000)return Promise.resolve(gameProbeResult);
+ gameProbe=new Promise(resolve=>{
+  cp.execFile('tasklist',['/FI','IMAGENAME eq eurotrucks2.exe','/FO','CSV','/NH'],{windowsHide:true,timeout:4500},(err,out)=>{
+   const status={running:err?null:/"eurotrucks2\.exe"/i.test(out),platform:'win32'};
+   if(!status.running)return resolve(status);
+   const command="Get-CimInstance Win32_Process -Filter \"Name='eurotrucks2.exe'\" | Select-Object ExecutablePath | ConvertTo-Json -Compress";
+   cp.execFile('powershell.exe',['-NoProfile','-NonInteractive','-Command',command],{windowsHide:true,timeout:6000,encoding:'utf8'},(error,json)=>{
+    try{resolve(error?status:{...status,...require('./game-location').runningGameLocation(json.trim())})}catch{resolve(status)}
+   });
+  });
+ }).then(result=>{gameProbeResult=result;gameProbeAt=Date.now();return result}).finally(()=>{gameProbe=null});
+ return gameProbe;
+}
 async function serverStatus(url){try{const u=new URL(url||settings().server);if(!['http:','https:'].includes(u.protocol))throw Error('Nieprawidłowy adres');const r=await fetch(new URL('/api/companies',u),{signal:AbortSignal.timeout(8000)});return {online:r.ok,status:r.status}}catch(e){return {online:false,error:'Brak połączenia z serwerem'}}}
 let captureDriver=null;
 let desktopAuth=null;
