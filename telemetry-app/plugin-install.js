@@ -4,7 +4,7 @@ const digest=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).dig
 function pluginFiles(game,source){
  if(!game||!fs.existsSync(path.join(game,'bin','win_x64','eurotrucks2.exe')))throw Error('Nie znaleziono ETS2. Wybierz folder gry w ustawieniach.');
  if(!fs.existsSync(source))throw Error('Brak wtyczki w aplikacji. Zainstaluj najnowszą wersję aplikacji.');
- return {source,target:path.join(game,'bin','win_x64','plugins','scs-telemetry.dll')};
+ return {source,target:path.join(game,'bin','win_x64','plugins','nowaczyk-telemetry.dll')};
 }
 async function ensurePlugin({game,source,running,elevate}){
  const files=pluginFiles(game,source),{target}=files;

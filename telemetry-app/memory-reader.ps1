@@ -1,6 +1,6 @@
 # RenCloud rev 12: fields through special_b end at byte 4399.
 function Read-NowaczykTelemetryMemory {
- param([string[]]$Names=@('Local\SCSTelemetry','SCSTelemetry','Global\SCSTelemetry'))
+ param([string[]]$Names=@('Local\NTTelemetry1'))
  $errors=New-Object 'System.Collections.Generic.List[string]'
  foreach($name in $Names) {
   $mapping=$null; $view=$null

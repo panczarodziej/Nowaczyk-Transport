@@ -18,3 +18,8 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+Nowaczyk modification: the generated nowaczyk-telemetry.dll uses the private
+Local\NTTelemetry1 mapping name. Executable code and telemetry layout are unchanged.
+Original scs-telemetry.dll is retained as the pinned upstream build input.

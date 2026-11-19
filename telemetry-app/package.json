@@ -1,12 +1,14 @@
 {
   "name": "nowaczyk-transport-telemetry",
-  "version": "0.3.40",
+  "version": "0.3.41",
   "private": true,
   "description": "Nowaczyk Transport \u2014 panel kierowcy i telemetria",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:win": "electron-builder --win nsis"
+    "build:win": "electron-builder --win nsis",
+    "prebuild:win": "node prepare-plugin.js",
+    "prestart": "node prepare-plugin.js"
   },
   "dependencies": {
     "electron-updater": "6.8.11",

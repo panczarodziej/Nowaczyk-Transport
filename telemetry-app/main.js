@@ -60,7 +60,7 @@ function detectEts(){
  return '';
 }
 function pluginStatus(etsPath){
- const target=path.join(etsPath||'', 'bin','win_x64','plugins','scs-telemetry.dll');
+ const target=path.join(etsPath||'', 'bin','win_x64','plugins','nowaczyk-telemetry.dll');
  return {installed:!!etsPath&&fs.existsSync(target),target,message:pluginMessage};
 }
 let pluginMessage='',pluginBusy=false;const pluginElevationAttempts=new Set();
@@ -78,7 +78,7 @@ async function installPlugin(etsPath,allowElevation=true){
  if(game.unsupported&&!game.folder)throw Error('Uruchom ETS2 w wersji 64-bitowej. Wtyczka obsługuje win_x64.');
  const folder=game.folder||etsPath;
  if(game.folder&&validEtsFolder(game.folder)&&settings().etsPath!==game.folder)fs.writeFileSync(file(),JSON.stringify({...settings(),etsPath:game.folder},null,2));
- const result=await require('./plugin-install').ensurePlugin({game:folder,source:resourcePath('plugins','scs-telemetry.dll'),running:game.running,elevate:allowElevation?elevatedPluginCopy:null});
+ const result=await require('./plugin-install').ensurePlugin({game:folder,source:resourcePath('plugins','nowaczyk-telemetry.dll'),running:game.running,elevate:allowElevation?elevatedPluginCopy:null});
  pluginMessage=result.pending?result.message:game.running&&(!lastTelemetry||Date.now()-lastTelemetry.receivedAt>15000)?'Plik jest we właściwym folderze gry, ale ETS2 nie udostępnia danych. Zamknij i uruchom grę ponownie; zaakceptuj komunikat SDK.':'Wtyczka ETS2 gotowa. Uruchom grę i wczytaj profil.';
  return result;
 }
