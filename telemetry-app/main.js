@@ -203,9 +203,9 @@ function startUpdates(){
   return;
  }
  const {autoUpdater}=require('electron-updater');
- autoUpdater.setFeedURL({provider:'github',owner:'panczarodziej',repo:'Nowaczyk-Transport'});
+ autoUpdater.setFeedURL({provider:'generic',url:'https://github.com/panczarodziej/Nowaczyk-Transport/releases/latest/download'});
  autoUpdater.autoDownload=true;
- autoUpdater.autoInstallOnAppQuit=false;
+ autoUpdater.autoInstallOnAppQuit=true;
  autoUpdater.disableDifferentialDownload=true;
  let downloaded=false,checkingGame=false,checking=false,downloading=false;
  const logPath=path.join(app.getPath('userData'),'updates.log');
@@ -224,7 +224,7 @@ function startUpdates(){
   try{
    const game=await gameStatus();
    if(game.running!==false){status('Aktualizacja pobrana. Zamknij ETS2, aby ją zainstalować.');return}
-   if(syncInProgress||autoDispatchBusy){status('Aktualizacja pobrana. Kończenie synchronizacji.');return}
+   if(syncInProgress||autoDispatchBusy){status('Aktualizacja pobrana. Kończenie synchronizacji.');setTimeout(()=>void installWhenIdle(),1000).unref();return}
    persistEvents();
    status('Instalowanie aktualizacji i ponowne uruchamianie aplikacji…');
    app.isQuitting=true;

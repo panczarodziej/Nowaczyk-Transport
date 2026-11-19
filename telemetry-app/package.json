@@ -1,6 +1,6 @@
 {
   "name": "nowaczyk-transport-telemetry",
-  "version": "0.3.38",
+  "version": "0.3.39",
   "private": true,
   "description": "Nowaczyk Transport \u2014 panel kierowcy i telemetria",
   "main": "main.js",
