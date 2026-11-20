@@ -59,6 +59,11 @@ test('main boss and dispatcher assign to every active role across companies; eac
   const delivered=await req('/api/telemetry/events',{type:'job-delivered',eventKey:'assignment-delivery-'+username,sourceCity:'Krakow',destinationCity:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'milk',cargoMassKg:18000,jobDeliveredDistanceKm:123.4},desktop.cookie);
   assert.equal(delivered.status,201);assert.equal(delivered.data.event.mileageRouteId,jobs.get(username),role+' delivers');
   const done=(await req('/api/routes?mine=1',null,desktop.cookie)).data.find(r=>r.id===jobs.get(username));assert.equal(done.status,'Zakończona');assert.equal(done.drivenKm,123.4);
+
+  const fuel={routeId:jobs.get(username),type:'Paliwo',amount:600,liters:100,country:'Polska',odometerKm:123456};
+  const fueled=await req('/api/expenses',fuel,desktop.cookie);assert.equal(fueled.status,201);assert.equal(fueled.data.liters,100);assert.equal(fueled.data.odometerKm,123456);
+  assert.equal((await req('/api/expenses',{...fuel,liters:0},desktop.cookie)).status,400);
+  const toll=await req('/api/expenses',{routeId:jobs.get(username),type:'Opłata drogowa',from:'Polska',to:'Niemcy',odometerKm:123500,amount:999},desktop.cookie);assert.equal(toll.status,201);assert.equal(toll.data.amount,0);assert.equal(toll.data.recordOnly,true);assert.equal(toll.data.odometerKm,123500);
   const manual=own.data.find(r=>r.id!==jobs.get(username));
   const report={routeId:manual.id,distanceKm:321.7,note:'Rozładunek zablokowany przez naczepę w grze; przewóz wykonany.',confirm:true};
   assert.equal((await req('/api/routes/deliver',report,desktop.cookie)).status,409);

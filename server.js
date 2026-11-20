@@ -1,3 +1,4 @@
+const automaticFinance=require('./automatic-finance');
 const {expireRejectedApplications}=require('./application-retention');
 'use strict';
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
@@ -261,7 +262,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/company/funding','/api/client-release','/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/fleet/sell','/api/fleet/sales','/api/company/board','/api/company/maintenance','/api/company/maintenance/complete','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/company/automatic-finance','/api/company/funding','/api/client-release','/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/fleet/sell','/api/fleet/sales','/api/company/board','/api/company/maintenance','/api/company/maintenance/complete','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
     !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/routes/deliver','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
@@ -587,6 +588,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id)&&!b,fundingSource:funding?.source,loanRemainingCents:(db.companyLoans?.[c.id]?.remainingCents??0)+(funding?.remainingCents??0),locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b||db.companyLoans?.[c.id]?(b?.initialCents??0)+income-costs:null};
   });return send(res,200,budgets);
  }
+ if(u.pathname==='/api/company/automatic-finance'&&method==='GET'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy.'});
+  const companyId=u.searchParams.get('companyId')||who(req).companyId;
+  if(!auth(req)&&companyId!==who(req).companyId)return send(res,403,{error:'Brak dostępu do firmy.'});
+  const loans=[db.companyLoans?.[companyId],db.startupFinance?.[companyId]?.source==='credit'?db.startupFinance[companyId]:null].filter(Boolean).map(l=>({remainingCents:l.remainingCents,schedule:l.automatic||null}));
+  return send(res,200,{payday:10,loanMonths:12,loans,pending:(db.pendingAutomaticPayments||[]).filter(p=>p.companyId===companyId)});
+ }
  if(u.pathname==='/api/company/funding'&&method==='GET'){
   if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy.'});
   const companyId=u.searchParams.get('companyId')||(!auth(req)?who(req).companyId:'');
@@ -608,7 +616,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const createdAt=new Date().toISOString();
   if(!initial&&!db.startupFinance?.[companyId]){db.startupFinance??={};db.startupFinance[companyId]={source:'grant',initialCents:0,remainingCents:0,lockedAt:createdAt};}
   const entry={id:crypto.randomUUID(),companyId,type:'dofinansowanie_szefa',amount:cents/100,description,createdAt,createdBy:who(req).username,operationKey};
-  (db.ledger??=[]).push(entry);await save(db);return send(res,201,{ok:true,entry});
+  (db.ledger??=[]).push(entry);await save(db);setImmediate(()=>void financeTick());return send(res,201,{ok:true,entry});
  }
  if(u.pathname==='/api/company/loan-requests'&&method==='GET'){
   if(!companyManager(req))return send(res,403,{error:'Brak uprawnień.'});
@@ -726,13 +734,15 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   const a=await body(req),driver=str(a.driver,50).toLowerCase(),month=str(a.month,7),bonus=Number(a.bonus||0),deduction=Number(a.deduction||0),manualAmount=a.amount===undefined||a.amount===null||a.amount===''?null:Number(a.amount);
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||!driver||![bonus,deduction].every(v=>Number.isFinite(v)&&v>=0&&v<=1000000)||(manualAmount!==null&&(!Number.isFinite(manualAmount)||manualAmount<0||manualAmount>1000000)))return send(res,400,{error:'Nieprawidłowe dane wypłaty'});
   if(!accounts.has(driver))return send(res,404,{error:'Nie znaleziono konta z tym loginem'});
-  db.payments??=[];if(db.payments.some(x=>x.driver===driver&&x.month===month))return send(res,409,{error:'Ten miesiąc został już rozliczony'});
-  const rows=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.settledAt&&r.settledAt.slice(0,7)===month);
+  const companyId=str(a.companyId,80)||accounts.get(driver).companyId||MAIN_COMPANY_ID;
+  if(!db.companies.some(c=>c.id===companyId&&!c.archivedAt))return send(res,400,{error:'Nie znaleziono firmy wypłacającej.'});
+  db.payments??=[];if(db.payments.some(x=>x.driver===driver&&x.month===month&&(!x.companyId||x.companyId===companyId)))return send(res,409,{error:'Ten miesiąc został już rozliczony'});
+  const rows=(db.routes||[]).filter(r=>r.driver.toLowerCase()===driver&&r.companyId===companyId&&r.settledAt&&r.settledAt.slice(0,7)===month);
   const base=rows.reduce((sum,r)=>sum+Math.round(r.drivenKm*(r.payRate??0.7)*100),0)/100;
   const amount=roundPLN((manualAmount===null?base:manualAmount)+bonus-deduction);if(amount<0)return send(res,400,{error:'Potrącenia przekraczają wynagrodzenie'});
   db.wallets??={};db.wallets[driver]=Math.round(((db.wallets[driver]||0)+amount)*100)/100;
-  db.payments.push({id:crypto.randomUUID(),driver,month,base:manualAmount===null?base:manualAmount,calculatedBase:base,bonus,deduction,amount,createdAt:new Date().toISOString()});
-  db.ledger??=[];db.ledger.push({id:crypto.randomUUID(),companyId:MAIN_COMPANY_ID,type:'wyplata',amount:-amount,createdAt:new Date().toISOString()});
+  db.payments.push({id:crypto.randomUUID(),driver,companyId,month,base:manualAmount===null?base:manualAmount,calculatedBase:base,bonus,deduction,amount,createdAt:new Date().toISOString()});
+  db.ledger??=[];db.ledger.push({id:crypto.randomUUID(),companyId,driver,month,type:'wyplata',amount:-amount,createdAt:new Date().toISOString()});
   await save(db);return send(res,201,{ok:true,amount});
  }
  if(u.pathname==='/api/economy/item'&&method==='POST'){
@@ -1055,8 +1065,13 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
   if(!r)return send(res,400,{error:'Wybierz istniejącą trasę'});
   if(!canDispatch(req)&&(r.companyId!==who(req).companyId||(!isSubcontractorBoss(req)&&r.driver.toLowerCase()!==who(req).username.toLowerCase())))return send(res,403,{error:'To nie jest Twoja trasa'});
   if(!['Paliwo','Opłata drogowa','Parking','Inne'].includes(a.type))return send(res,400,{error:'Nieprawidłowy rodzaj kosztu'});
-  const amount=Number(a.amount);if(!Number.isFinite(amount)||amount<=0||amount>1000000)return send(res,400,{error:'Nieprawidłowa kwota'});
-  const e={id:crypto.randomUUID(),routeId:r.id,vehicleId:r.vehicleId||null,companyId:r.companyId,driver:r.driver,type:a.type,country:str(a.country,80),from:str(a.from,120),to:str(a.to,120),place:str(a.place,120),liters:Number(a.liters)||0,amount,currency:'PLN',createdAt:new Date().toISOString()};
+  const toll=a.type==='Opłata drogowa',fuel=a.type==='Paliwo';
+  const amount=toll?0:Number(a.amount),liters=Number(a.liters),odometerKm=Number(a.odometerKm),country=str(a.country,80),from=str(a.from,80),to=str(a.to,80);
+  if(!toll&&(!Number.isFinite(amount)||amount<=0||amount>1000000))return send(res,400,{error:'Nieprawidłowa kwota'});
+  if((fuel||toll)&&(!Number.isFinite(odometerKm)||odometerKm<0||odometerKm>100000000||a.odometerKm==null||a.odometerKm===''))return send(res,400,{error:'Podaj prawidłowy przebieg licznika.'});
+  if(fuel&&(!country||!Number.isFinite(liters)||liters<=0||liters>5000))return send(res,400,{error:'Podaj kraj tankowania i liczbę litrów (do 5000).'});
+  if(toll&&(!from||!to))return send(res,400,{error:'Podaj kraj wyjazdu i kraj docelowy.'});
+  const e={id:crypto.randomUUID(),routeId:r.id,vehicleId:r.vehicleId||null,companyId:r.companyId,driver:r.driver,type:a.type,country,from,to,place:str(a.place,120),liters:fuel?liters:0,odometerKm:(fuel||toll)?odometerKm:null,amount,currency:'PLN',recordOnly:toll,createdAt:new Date().toISOString()};
   db.expenses??=[];db.expenses.push(e);await save(db);return send(res,201,e);
  }
  if(u.pathname==='/api/admin/subcontractor-mileage'&&method==='GET'){
@@ -1628,6 +1643,6 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  res.writeHead(200,{'Content-Type':mime[path.extname(full)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-store','Content-Security-Policy':policy});fs.createReadStream(full).pipe(res);
 }catch(e){if(res.destroyed)return;console.error(e);if(!res.headersSent)send(res,500,{error:'Błąd serwera'})}finally{release?.()}});
 async function applicationRetentionTick(){const previous=mutationTail;let release;mutationTail=new Promise(resolve=>{release=resolve});await previous;try{const db=await load();if(expireRejectedApplications(db))await save(db)}catch(error){console.error('Usuwanie odrzuconych podań:',error.message)}finally{release()}}
-async function financeTick(){const previous=mutationTail;let release;mutationTail=new Promise(resolve=>{release=resolve});await previous;try{const db=await load();if(pool){const budgets=await pool.query('SELECT company_id,initial_cents FROM ks_company_budget');db.initialBudgets=Object.fromEntries(budgets.rows.map(x=>[x.company_id,{initialCents:Number(x.initial_cents)}]))}if(fleetFinance.processDue(db))await save(db)}catch(error){console.error('Finanse floty:',error)}finally{release()}}
-initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>{console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT);void applicationRetentionTick();setInterval(applicationRetentionTick,60000).unref();financeTick();setInterval(financeTick,60*60*1000).unref()})).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
+async function financeTick(){const previous=mutationTail;let release;mutationTail=new Promise(resolve=>{release=resolve});await previous;try{const db=await load();if(pool){const budgets=await pool.query('SELECT company_id,initial_cents FROM ks_company_budget');db.initialBudgets=Object.fromEntries(budgets.rows.map(x=>[x.company_id,{initialCents:Number(x.initial_cents)}]))}const automaticChanged=automaticFinance.processAutomatic(db);const fleetChanged=fleetFinance.processDue(db);if(automaticChanged||fleetChanged)await save(db)}catch(error){console.error('Finanse floty:',error)}finally{release()}}
+initStore().then(async()=>{if(accounts.size===0){const acct={id:crypto.randomUUID(),username:process.env.ADMIN_LOGIN||'admin',role:'admin',companyId:MAIN_COMPANY_ID,active:true,...passwordHash(password)};accounts.set(acct.username.toLowerCase(),acct);const d=await load();d.accounts=[acct];await save(d)}return true}).then(()=>server.listen(PORT,'0.0.0.0',()=>{console.log('Nowaczyk Transport Online: http://0.0.0.0:'+PORT);void applicationRetentionTick();setInterval(applicationRetentionTick,60000).unref();financeTick();setInterval(financeTick,60000).unref()})).catch(e=>{console.error('Błąd połączenia z bazą:',e.message);process.exit(1)});
 

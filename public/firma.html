@@ -368,6 +368,12 @@ async function loadCompanies(){
    card.append(remove);
   }
   const budget=budgets.find(b=>b.companyId===company.id);
+  const automatic=await api('/api/company/automatic-finance?companyId='+encodeURIComponent(company.id));
+  const finance=element('section');finance.append(element('h3','Automatyczne rozliczenia'),element('p','Wypłaty za poprzedni miesiąc: 10. dnia. Kredyty: 12 rat miesięcznych, płatnych 10. dnia. Niezapłacone pozycje są ponawiane po zasileniu salda firmy.'));
+  for(const loan of automatic.loans){const schedule=loan.schedule;finance.append(element('p','Kredyt: pozostało '+money(loan.remainingCents)+(schedule?' · rata '+money(schedule.instalmentCents)+' · termin '+schedule.nextDue+' · '+(schedule.status==='overdue'?'ZALEGŁA — brak środków':loan.remainingCents>0?'automatyczna spłata':'spłacony'):' · harmonogram zostanie utworzony automatycznie w ciągu minuty')))}
+  for(const pay of automatic.pending)finance.append(element('p','ZALEGŁA WYPŁATA · '+pay.driver+' · '+pay.month+' · '+money(Math.round(pay.amount*100))+' · brak środków firmy'));
+  card.append(finance);
+
   if(budget?.locked)card.append(element('p','Saldo · '+money(budget.balanceCents)+' · Wydatki · '+money(budget.costCents)+' · Budżet startowy · '+money(budget.initialCents)));
   if(partners&&manager){
    const box=element('section'),title=element('h3','Dodaj pieniądze firmie'),form=element('form');
