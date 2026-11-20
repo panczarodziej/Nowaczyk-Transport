@@ -261,7 +261,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  req[requestSession]=key?db.authSessions?.[key]:null;
  const subcontractorCompanySettings=u.pathname==='/api/admin/companies'&&['GET','PATCH'].includes(method)&&isSubcontractorBoss(req);
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
-    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/client-release','/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/fleet/sell','/api/fleet/sales','/api/company/board','/api/company/maintenance','/api/company/maintenance/complete','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
+    !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/company/funding','/api/client-release','/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/fleet/sell','/api/fleet/sales','/api/company/board','/api/company/maintenance','/api/company/maintenance/complete','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
     !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
@@ -586,6 +586,29 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
    const {income,costs}=companyCashFlow(db,c.id);
    return {companyId:c.id,name:c.name,canSetInitialBudget:canSetInitialBudget(req,c.id)&&!b,fundingSource:funding?.source,loanRemainingCents:(db.companyLoans?.[c.id]?.remainingCents??0)+(funding?.remainingCents??0),locked:!!b,initialCents:b?.initialCents??null,lockedAt:b?.lockedAt??null,incomeCents:income,costCents:costs,balanceCents:b||db.companyLoans?.[c.id]?(b?.initialCents??0)+income-costs:null};
   });return send(res,200,budgets);
+ }
+ if(u.pathname==='/api/company/funding'&&method==='GET'){
+  if(!companyManager(req))return send(res,403,{error:'Tylko szef firmy.'});
+  const companyId=u.searchParams.get('companyId')||(!auth(req)?who(req).companyId:'');
+  if(!auth(req)&&companyId!==who(req).companyId)return send(res,403,{error:'Brak dostępu do finansów innej firmy.'});
+  return send(res,200,(db.ledger||[]).filter(x=>x.type==='dofinansowanie_szefa'&&(!companyId||x.companyId===companyId)).slice().reverse());
+ }
+ if(u.pathname==='/api/company/funding'&&method==='POST'){
+  if(!auth(req))return send(res,403,{error:'Pieniądze dopisuje wyłącznie główny szef.'});
+  const a=await body(req),companyId=str(a.companyId,80),cents=priceCents(a.amount),description=str(a.description,250),operationId=str(a.operationId,80);
+  if(!db.companies.some(c=>c.id===companyId&&!c.archivedAt)||companyId===MAIN_COMPANY_ID)return send(res,400,{error:'Wybierz aktywną firmę podwykonawczą.'});
+  if(!cents||!description||!/^[-a-zA-Z0-9_]{12,80}$/.test(operationId))return send(res,400,{error:'Podaj dodatnią kwotę (do 2 miejsc po przecinku), opis i identyfikator operacji.'});
+  const operationKey='company-funding:'+operationId;
+  const existing=(db.ledger||[]).find(x=>x.operationKey===operationKey);
+  if(existing){
+   if(existing.companyId!==companyId||Math.round(existing.amount*100)!==cents||existing.description!==description)return send(res,409,{error:'Identyfikator operacji został już użyty dla innej wpłaty.'});
+   return send(res,200,{ok:true,duplicate:true,entry:existing});
+  }
+  const initial=pool?(await pool.query('SELECT 1 FROM ks_company_budget WHERE company_id=$1',[companyId])).rowCount:Object.hasOwn(db.initialBudgets||{},companyId);
+  const createdAt=new Date().toISOString();
+  if(!initial&&!db.startupFinance?.[companyId]){db.startupFinance??={};db.startupFinance[companyId]={source:'grant',initialCents:0,remainingCents:0,lockedAt:createdAt};}
+  const entry={id:crypto.randomUUID(),companyId,type:'dofinansowanie_szefa',amount:cents/100,description,createdAt,createdBy:who(req).username,operationKey};
+  (db.ledger??=[]).push(entry);await save(db);return send(res,201,{ok:true,entry});
  }
  if(u.pathname==='/api/company/loan-requests'&&method==='GET'){
   if(!companyManager(req))return send(res,403,{error:'Brak uprawnień.'});

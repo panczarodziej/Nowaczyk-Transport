@@ -369,6 +369,23 @@ async function loadCompanies(){
   }
   const budget=budgets.find(b=>b.companyId===company.id);
   if(budget?.locked)card.append(element('p','Saldo · '+money(budget.balanceCents)+' · Wydatki · '+money(budget.costCents)+' · Budżet startowy · '+money(budget.initialCents)));
+  if(partners&&manager){
+   const box=element('section'),title=element('h3','Dodaj pieniądze firmie'),form=element('form');
+   const amountLabel=element('label','Kwota do dodania (PLN) '),amount=element('input');amount.type='number';amount.min='0.01';amount.max='999999999.99';amount.step='0.01';amount.required=true;amountLabel.append(amount);
+   const noteLabel=element('label','Opis wpłaty '),note=element('input');note.required=true;note.maxLength=250;note.placeholder='np. Dofinansowanie floty';noteLabel.append(note);
+   const submit=element('button','Dodaj pieniądze'),status=element('p');status.setAttribute('role','status');
+   let operationId=crypto.randomUUID(),submitted=null;
+   const history=element('ul');
+   async function refreshFunding(){const rows=await api('/api/company/funding?companyId='+encodeURIComponent(company.id));history.replaceChildren();for(const row of rows.slice(0,10))history.append(element('li',new Date(row.createdAt).toLocaleString('pl-PL')+' · +'+money(Math.round(row.amount*100))+' · '+row.description+' · '+row.createdBy));if(!rows.length)history.append(element('li','Brak dofinansowań.'));}
+   form.onsubmit=async event=>{
+    event.preventDefault();if(submit.disabled)return;
+    const payload={companyId:company.id,amount:amount.value.replace(',','.'),description:note.value.trim()};
+    const signature=JSON.stringify(payload);if(submitted&&submitted!==signature)operationId=crypto.randomUUID();submitted=signature;submit.disabled=true;let committed=false;
+    try{await api('/api/company/funding','POST',{...payload,operationId});committed=true;operationId=crypto.randomUUID();submitted=null;amount.value='';note.value='';get('settingsStatus').textContent='Dodano pieniądze do salda firmy '+company.name+'.';await loadCompanies()}
+    catch(error){status.textContent=committed?'Wpłata została zapisana. Odśwież stronę, aby zobaczyć aktualne saldo.':error.message;submit.disabled=committed}
+   };
+   form.append(amountLabel,noteLabel,submit);box.append(title,element('p','Wpłata zwiększa saldo firmy i pozostaje w historii finansów.'),form,status,element('h4','Ostatnie dofinansowania'),history);card.append(box);await refreshFunding();
+  }
   if(budget&&!budget.locked&&budget.canSetInitialBudget){
    const form=element('form'),label=element('label','Budżet startowy (PLN) '),amount=element('input'),submit=element('button','Nadaj budżet');
    amount.type='number';amount.min='0';amount.step='0.01';amount.required=true;label.append(amount);form.append(label,submit);card.append(form);

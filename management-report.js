@@ -3,7 +3,7 @@ const num=v=>Number.isFinite(Number(v))?Number(v):0;
 const money=v=>Math.round((v+Number.EPSILON)*100)/100;
 const monthOf=v=>String(v||'').slice(0,7);
 const completed=r=>!!(r.settledAt||r.deliveredAt||r.status==='Zakończona');
-const CAPITAL=new Set(['kredyt firmowy','spłata kredytu','zakup_pojazdu','sprzedaz_pojazdu','finansowanie_poczatkowe','wpłata leasingowa']);
+const CAPITAL=new Set(['dofinansowanie_szefa','kredyt firmowy','spłata kredytu','zakup_pojazdu','sprzedaz_pojazdu','finansowanie_poczatkowe','wpłata leasingowa']);
 function report(db,companyId,month,today,reviewAll=false){
  const companies=db.companies||[],accounts=db.accounts||[];
  const routes=[...new Map([...(db.archivedRoutes||[]),...(db.routes||[])].filter(r=>r.companyId===companyId).map(r=>[r.id,r])).values()];
