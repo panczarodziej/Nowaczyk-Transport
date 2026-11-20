@@ -59,6 +59,15 @@ test('main boss and dispatcher assign to every active role across companies; eac
   const delivered=await req('/api/telemetry/events',{type:'job-delivered',eventKey:'assignment-delivery-'+username,sourceCity:'Krakow',destinationCity:'Berlin',sourceCompany:'transinet',destinationCompany:'tradeaux',cargo:'milk',cargoMassKg:18000,jobDeliveredDistanceKm:123.4},desktop.cookie);
   assert.equal(delivered.status,201);assert.equal(delivered.data.event.mileageRouteId,jobs.get(username),role+' delivers');
   const done=(await req('/api/routes?mine=1',null,desktop.cookie)).data.find(r=>r.id===jobs.get(username));assert.equal(done.status,'Zakończona');assert.equal(done.drivenKm,123.4);
+  const manual=own.data.find(r=>r.id!==jobs.get(username));
+  const report={routeId:manual.id,distanceKm:321.7,note:'Rozładunek zablokowany przez naczepę w grze; przewóz wykonany.',confirm:true};
+  assert.equal((await req('/api/routes/deliver',report,desktop.cookie)).status,409);
+  assert.equal((await req('/api/routes/accept',{routeId:manual.id},desktop.cookie,{'X-Nowaczyk-Desktop-Token':desktop.data.desktopToken})).status,200);
+  assert.equal((await req('/api/routes/deliver',{...report,distanceKm:0},desktop.cookie)).status,400);
+  const reported=await req('/api/routes/deliver',report,desktop.cookie);assert.equal(reported.status,201,role+' manual delivery');assert.equal(reported.data.route.drivenKm,321.7);assert.equal(reported.data.route.deliveryMethod,'driver-report');
+  const repeated=await req('/api/routes/deliver',report,desktop.cookie);assert.equal(repeated.data.duplicate,true);assert.equal(repeated.data.route.drivenKm,321.7);
+  const saved=JSON.parse(fs.readFileSync(path.join(dir,'data.json'),'utf8'));assert.equal(saved.ledger.filter(e=>e.routeId===manual.id).length,1);assert.equal(saved.deliveryReports.filter(e=>e.routeId===manual.id).length,1);
+
  }
  const sub=logged.get('subboss');
  const ownList=(await req('/api/routes/assignees',null,sub.cookie)).data;

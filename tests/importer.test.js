@@ -101,8 +101,15 @@ trailer_def : trailer_def.scs.box {
 trailer : _trailer {`);
  const rampJob={...ownedJob,to:{...ownedJob.to,deliveryPlacements:{hard:[dock,'(45, 2, 3)(1; 0, 0, 0)'],easy:[point]}}};
  const parkedResult=plan(parked,rampJob,{source:point});
- assert.match(parkedResult.text,/target_placement: \(45, 2, 3\)/);
- assert.match(parkedResult.text,/target_placement_medium: \(45, 2, 3\)/);
+ assert.match(parkedResult.text,/target_placement: \(1, 2, 3\)/);
+ assert.match(parkedResult.text,/target_placement_medium: \(1, 2, 3\)/);
+ assert.match(parkedResult.text,/target_placement_hard: \(45, 2, 3\)/);
+ const repairInput=parkedResult.text.replace('job_distance: 0','job_distance: 123.4').replace('is_trailer_loaded: false','is_trailer_loaded: true');
+ const repaired=plan(repairInput,rampJob,{repair:true});
+ assert.match(repaired.text,/target_placement: \(1, 2, 3\)/);
+ assert.match(repaired.text,/target_placement_hard: \(45, 2, 3\)/);
+ assert.match(repaired.text,/is_trailer_loaded: true/);assert.match(repaired.text,/job_distance: 123.4/);
+ assert.throws(()=>plan(parkedResult.text,{...rampJob,to:rampJob.from},{repair:true}));
  const modern=plan(fixture,ownedJob,{source:point});
  assert.match(modern.text,/is_cargo_market_job: true/);
  assert.match(modern.text,/is_trailer_loaded: false/);
@@ -176,3 +183,4 @@ trailer_def : trailer_def.scs.box.single_3.reefer {
  const detached=refrigerated.replace('my_trailer: _owned_trailer','my_trailer: null');
  assert.throws(()=>plan(detached,route,{source:point}),/aktywnej własnej naczepy/);
 });
+

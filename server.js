@@ -263,7 +263,7 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  if(isSubcontractorBoss(req)&&u.pathname.startsWith('/api/')&&!subcontractorCompanySettings&&!u.pathname.startsWith('/api/transport-documents')&&
     !u.pathname.startsWith('/api/fleet-finance/')&&!['/api/company/funding','/api/client-release','/api/my-applications','/api/applications','/api/notifications','/api/company/startup-finance','/api/company/loan','/api/company/loan-requests','/api/company/trailer-license','/api/company/management','/api/fleet/sell','/api/fleet/sales','/api/company/board','/api/company/maintenance','/api/company/maintenance/complete','/api/economy/order/decide','/api/company/accessory-invoice','/api/company/employment','/api/company/fleet-expense','/api/company/vehicle-requests','/api/fleet/buy'].includes(u.pathname)&&
     !(method==='GET'&&['/api/fleet','/api/trailers','/api/freight-market','/api/routes/assignees','/api/routes/export','/api/driver/mileage','/api/telemetry/me','/api/finance'].includes(u.pathname))&&
-    !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
+    !['/api/fleet','/api/trailers','/api/desktop/login','/api/routes/accept','/api/routes/deliver','/api/driver/map-profile','/api/telemetry/events','/api/fleet/position','/api/routes','/api/routes/archive','/api/routes/progress','/api/routes/quote','/api/expenses','/api/tachograph','/api/economy/lights'].includes(u.pathname)&&
     !(method==='GET'&&u.pathname==='/api/economy'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&u.pathname==='/api/budgets'&&u.searchParams.get('mine')==='1')&&
     !(method==='GET'&&['/api/fleet/positions','/api/company/summary'].includes(u.pathname))&&
@@ -895,6 +895,20 @@ const server=http.createServer(async(req,res)=>{let release; if(!['GET','HEAD'].
  }
  // Trasy i koszty: wszystkie zapisy w tym samym magazynie PostgreSQL.
  // Eksport zlecenia kierowcy — bez wstrzykiwania do giełdy ETS2.
+ if(u.pathname==='/api/routes/deliver'&&method==='POST'){
+  const me=who(req);if(!me||!canDrive(req))return send(res,403,{error:'Zaloguj się na aktywne konto kierowcy.'});
+  const a=await body(req),route=(db.routes||[]).find(r=>r.id===a.routeId&&r.driver.toLowerCase()===me.username.toLowerCase()&&r.companyId===(me.companyId||MAIN_COMPANY_ID));
+  if(!route)return send(res,404,{error:'Nie znaleziono Twojej trasy.'});
+  if(route.settledAt||route.deliveredAt)return send(res,200,{ok:true,duplicate:true,route});
+  if(!route.acceptedAt)return send(res,409,{error:'Najpierw przyjmij trasę w aplikacji.'});
+  const km=Number(a.distanceKm),note=str(a.note,500);
+  if(a.confirm!==true||!Number.isFinite(km)||km<=0||km>100000||Math.round(km*10)<=0||note.length<10)return send(res,400,{error:'Podaj rzeczywisty dystans, opis (min. 10 znaków) i potwierdź wykonanie przewozu.'});
+  const at=new Date().toISOString();
+  Object.assign(route,{drivenKm:Math.round(km*10)/10,status:'Zakończona',deliveredAt:at,settledAt:at,deliveryMethod:'driver-report',deliveryNote:note,reportedBy:me.username,verified:false});delete route.liveDrivenKm;
+  (db.ledger??=[]).push({id:crypto.randomUUID(),routeId:route.id,companyId:route.companyId,type:'fracht',amount:roundPLN(Number(route.freight||0)),createdAt:at,source:'driver-report'});
+  (db.deliveryReports??=[]).push({id:crypto.randomUUID(),routeId:route.id,driver:me.username,companyId:route.companyId,distanceKm:route.drivenKm,note,createdAt:at,source:'driver-report'});
+  await save(db);return send(res,201,{ok:true,route});
+ }
  if(u.pathname==='/api/routes/accept'&&method==='POST'){
   const me=who(req);if(!me||!canDrive(req))return send(res,403,{error:'Wymagane konto kierowcy'});
   const expected=req[requestSession]?.desktopDigest,provided=req.headers['x-nowaczyk-desktop-token'];

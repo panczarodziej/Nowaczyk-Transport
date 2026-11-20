@@ -70,6 +70,16 @@ function plan(text,job,ramps){
  function company(side){const matches=companies.filter(u=>{const parts=u.id.slice(17).split('.');return norm(parts.pop())===norm(side.city)&&norm(parts.join('.'))===norm(side.company)});if(matches.length!==1)throw Error('Nie znaleziono jednoznacznej firmy '+side.company+' w '+side.city+'. W zleceniu użyj identyfikatorów z aktywnej mapy ETS2.');return matches[0]}
  const from=company(source),to=company(dest);
  if(from.id===to.id)throw Error('Załadunek i rozładunek muszą być różne');
+ if(ramps?.repair){
+  const player=list.find(u=>u.type==='player'),active=player&&field(player,'current_job');
+  const current=list.find(u=>u.type==='player_job'&&u.id===active);
+  if(!current||field(current,'is_cargo_market_job')!=='true'||field(current,'source_company')!==from.id||field(current,'target_company')!==to.id)throw Error('Aktywne zlecenie w zapisie nie pasuje do wybranej trasy rynku ładunków.');
+  const occupied=list.filter(u=>u.type==='player_vehicles'&&u.id!==field(player,'assigned_vehicles')).flatMap(u=>[...u.text.matchAll(/^ *stored_trailer_placements\[\d+\]: *([^\r\n]+)/gm)]).map(m=>placementCoordinates(m[1].trim())).filter(Boolean);
+  const points=dest.deliveryPlacements,easy=freePlacement(points?.easy||[],occupied),medium=freePlacement(points?.medium||[],occupied)||easy,hard=freePlacement(points?.hard||[],occupied)||medium;
+  if(!easy)throw Error('Brak wolnego łatwego punktu rozładunku w katalogu tej firmy. Nie zmieniono zapisu.');
+  let changed=current.text;for(const [key,value] of Object.entries({target_placement:easy,target_placement_medium:medium,target_placement_hard:hard,selected_target:'nil'}))changed=replaceField(changed,key,value);
+  return {text:text.slice(0,current.start)+changed+text.slice(current.end),notice:'Przywrócono osobne punkty rozładunku. Wczytaj zapis i wybierz łatwe parkowanie lub pominięcie manewru. Ładunek i przejechane kilometry pozostają zapisane.'};
+ }
  const refs=new Set([...from.text.matchAll(/^\s*job_offer\[\d+\]:\s*(\S+)/gm)].map(m=>m[1]));
  const definitions=new Map(list.filter(unit=>unit.type==='trailer_def').map(unit=>[unit.id,unit]));
  const allowedTypes={firanka:['curtainside',/(?:^|\.)curtain(?:_|$)/i],chlodnia:['refrigerated',/(?:^|\.)reefer(?:_|$)/i]};
@@ -136,10 +146,10 @@ if(!slot&&ramps){
    .map(match=>placementCoordinates(match[1].trim())).filter(Boolean);
   const sourcePlacement=freePlacement([ramps.source,...(source.loadingPlacements||[])],occupied);
   const points=dest.deliveryPlacements;
-  const target=freePlacement([...(points?.hard||[]),...(points?.medium||[]),...(points?.easy||[])],occupied);
+  const target=freePlacement([...(points?.easy||[]),...(points?.medium||[]),...(points?.hard||[])],occupied);
   if(!sourcePlacement||!target)throw Error('Brak wolnego stanowiska załadunku lub rozładunku w zapisie. Wybierz inną firmę albo odśwież zapis.');
-  // Use one destination for every parking option, including auto-parking.
-  const medium=target,hard=target;
+  // Preserve parking difficulty: auto/easy must not be forced onto a hard dock.
+  const medium=freePlacement(points?.medium||[],occupied)||target,hard=freePlacement(points?.hard||[],occupied)||medium;
   const numbers={units_count:Number(field(slot,'units_count')),ferry_time:Number(field(slot,'ferry_time')||0),ferry_price:Number(field(slot,'ferry_price')||0),urgency:Number(field(slot,'urgency')||0)};
   if(Object.values(numbers).some(n=>!Number.isSafeInteger(n)||n<0)||!numbers.units_count)throw Error('Nieprawidłowe dane wzorcowej oferty ETS2.');
   const id='_nameless.aaa.'+crypto.randomBytes(2).toString('hex')+'.'+crypto.randomBytes(2).toString('hex');
@@ -163,3 +173,4 @@ function importFile(file,job,ramps){
  const {text,...details}=result;return {...details,backup};
 }
 module.exports={plan,importFile,decodeSave,readLoadingPoint,loadingPoint};
+
